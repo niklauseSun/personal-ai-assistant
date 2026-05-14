@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "Personal AI Assistant",
+    "slug": "personal-ai-assistant",
+    "scheme": "personal-ai-assistant",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@personal-ai-assistant/server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm prisma:generate && tsc -p tsconfig.json",
+    "db:push": "RUST_BACKTRACE=1 DATABASE_URL=\"file:./dev.db\" prisma db push --schema prisma/schema.prisma",
+    "prisma:generate": "DATABASE_URL=\"file:./dev.db\" prisma generate --schema prisma/schema.prisma",
+    "start": "pnpm prisma:generate && tsx src/main.ts",
+    "start:dev": "tsx watch src/main.ts",
+    "test": "pnpm prisma:generate && RUST_BACKTRACE=1 DATABASE_URL=\"file:./test.db\" prisma db push --schema prisma/schema.prisma --skip-generate && DATABASE_URL=\"file:./test.db\" tsx --test src/**/*.test.ts",
+    "typecheck": "pnpm prisma:generate && tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.6",
+    "@nestjs/core": "^11.1.6",
+    "@nestjs/platform-express": "^11.1.6",
+    "@nestjs/platform-socket.io": "^11.1.6",
+    "@nestjs/websockets": "^11.1.6",
+    "@personal-ai-assistant/shared": "workspace:*",
+    "@prisma/client": "^6.19.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "prisma": "^6.19.3",
+    "tsx": "^4.20.6"
+  }
+}

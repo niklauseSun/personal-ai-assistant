@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model DeviceSession {
+  id            String   @id @default(cuid())
+  deviceId      String
+  clientType    String
+  deviceName    String?
+  socketId      String?
+  status        String   @default("online")
+  clientVersion String?
+  metadataJson  String?
+  registeredAt  DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+
+  @@unique([deviceId, clientType])
+  @@index([deviceId])
+  @@index([socketId])
+}
+
+model AgentTask {
+  id                      String            @id @default(cuid())
+  deviceId                String
+  prompt                  String
+  status                  String            @default("created")
+  createdByConnectionId   String?
+  assignedDesktopDeviceId String?
+  metadataJson            String?
+  failureCode             String?
+  failureMessage          String?
+  exitCode                Int?
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+  startedAt               DateTime?
+  completedAt             DateTime?
+  outputChunks            OutputChunk[]
+  approvalRequests        ApprovalRequest[]
+  approvalResults         ApprovalResult[]
+  events                  TaskEvent[]
+
+  @@index([deviceId, createdAt])
+  @@index([deviceId, status, createdAt])
+  @@index([status])
+}
+
+model OutputChunk {
+  id        String    @id
+  taskId    String
+  sequence  Int
+  stream    String
+  content   String
+  createdAt DateTime  @default(now())
+  task      AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, sequence])
+  @@index([taskId, createdAt])
+}
+
+model ApprovalRequest {
+  id                 String    @id
+  taskId             String
+  status             String    @default("pending")
+  title              String
+  description        String?
+  riskLevel          String    @default("medium")
+  message            String?
+  command            String?
+  metadataJson       String?
+  createdAt          DateTime  @default(now())
+  resolvedAt         DateTime?
+  resolvedByDeviceId String?
+  task               AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  result             ApprovalResult?
+
+  @@index([taskId, createdAt])
+  @@index([status])
+}
+
+model ApprovalResult {
+  id                 String          @id @default(cuid())
+  taskId             String
+  approvalRequestId  String          @unique
+  status             String
+  decision           String
+  reason             String?
+  resolvedByDeviceId String
+  resolvedAt         DateTime
+  createdAt          DateTime        @default(now())
+  task               AgentTask       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  approvalRequest    ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, resolvedAt])
+  @@index([status])
+}
+
+model TaskEvent {
+  id          String    @id @default(cuid())
+  taskId      String
+  eventName   String
+  payloadJson String
+  createdAt   DateTime  @default(now())
+  task        AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@index([eventName])
+}

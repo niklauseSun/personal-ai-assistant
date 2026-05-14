@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.expo/
+.turbo/
+.DS_Store
+*.log
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+data/*.sqlite
+data/*.sqlite-*
+*.db
+*.db-journal
