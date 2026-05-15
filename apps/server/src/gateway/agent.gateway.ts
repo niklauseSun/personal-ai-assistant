@@ -59,7 +59,10 @@ export class AgentGateway implements OnGatewayDisconnect {
   async handleTaskCreate(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
     try {
       const binding = this.deviceConnectionService.requireSocketBinding(client.id, "mobile");
-      const response = await this.taskService.createTask(payload, client.id);
+      const shouldPersist = await this.shouldPersist(binding.deviceId);
+      const response = shouldPersist
+        ? await this.taskService.createTask(payload, client.id)
+        : this.taskService.createTransientTask(payload);
 
       if (response.task.createdByDeviceId !== binding.deviceId) {
         throw new WsException("task.create deviceId must match the registered mobile device");
@@ -76,7 +79,13 @@ export class AgentGateway implements OnGatewayDisconnect {
 
   @SubscribeMessage(WS_EVENTS.TASK_STARTED)
   async handleTaskStarted(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    return this.forwardDesktopEvent(client, async () => {
+    return this.forwardDesktopEvent(client, async (binding) => {
+      if (!(await this.shouldPersist(binding.deviceId))) {
+        const relayPayload = this.taskService.toRelayTaskStarted(payload);
+        this.emitToClientType(binding.deviceId, "mobile", WS_EVENTS.TASK_STARTED, relayPayload);
+        return relayPayload;
+      }
+
       const result = await this.taskService.markStarted(payload);
       this.emitToClientType(result.deviceId, "mobile", WS_EVENTS.TASK_STARTED, result.payload);
       return result.payload;
@@ -85,7 +94,13 @@ export class AgentGateway implements OnGatewayDisconnect {
 
   @SubscribeMessage(WS_EVENTS.TASK_OUTPUT)
   async handleTaskOutput(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    return this.forwardDesktopEvent(client, async () => {
+    return this.forwardDesktopEvent(client, async (binding) => {
+      if (!(await this.shouldPersist(binding.deviceId))) {
+        const relayPayload = this.taskService.toRelayTaskOutput(payload);
+        this.emitToClientType(binding.deviceId, "mobile", WS_EVENTS.TASK_OUTPUT, relayPayload);
+        return relayPayload;
+      }
+
       const result = await this.taskService.appendOutput(payload);
       this.emitToClientType(result.deviceId, "mobile", WS_EVENTS.TASK_OUTPUT, result.payload);
       return result.payload;
@@ -97,7 +112,18 @@ export class AgentGateway implements OnGatewayDisconnect {
     @MessageBody() payload: unknown,
     @ConnectedSocket() client: Socket
   ) {
-    return this.forwardDesktopEvent(client, async () => {
+    return this.forwardDesktopEvent(client, async (binding) => {
+      if (!(await this.shouldPersist(binding.deviceId))) {
+        const relayPayload = this.taskService.toRelayTaskWaitingApproval(payload);
+        this.emitToClientType(
+          binding.deviceId,
+          "mobile",
+          WS_EVENTS.TASK_WAITING_APPROVAL,
+          relayPayload
+        );
+        return relayPayload;
+      }
+
       const result = await this.taskService.markWaitingApproval(payload);
       this.emitToClientType(
         result.deviceId,
@@ -116,7 +142,17 @@ export class AgentGateway implements OnGatewayDisconnect {
   ) {
     try {
       const binding = this.deviceConnectionService.requireSocketBinding(client.id, "mobile");
-      const result = await this.taskService.submitApproval(payload);
+      const shouldPersist = await this.shouldPersist(binding.deviceId);
+      const result = shouldPersist
+        ? await this.taskService.submitApproval(payload)
+        : {
+            deviceId: binding.deviceId,
+            ...this.taskService.toRelayApproval(payload)
+          };
+
+      if (result.submitPayload.deviceId !== binding.deviceId) {
+        throw new WsException("task approval deviceId must match registered mobile device");
+      }
 
       if (binding.deviceId !== result.deviceId) {
         throw new WsException("task approval deviceId does not match registered mobile device");
@@ -143,7 +179,13 @@ export class AgentGateway implements OnGatewayDisconnect {
 
   @SubscribeMessage(WS_EVENTS.TASK_COMPLETED)
   async handleTaskCompleted(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    return this.forwardDesktopEvent(client, async () => {
+    return this.forwardDesktopEvent(client, async (binding) => {
+      if (!(await this.shouldPersist(binding.deviceId))) {
+        const relayPayload = this.taskService.toRelayTaskCompleted(payload);
+        this.emitToClientType(binding.deviceId, "mobile", WS_EVENTS.TASK_COMPLETED, relayPayload);
+        return relayPayload;
+      }
+
       const result = await this.taskService.markCompleted(payload);
       this.emitToClientType(result.deviceId, "mobile", WS_EVENTS.TASK_COMPLETED, result.payload);
       return result.payload;
@@ -152,7 +194,13 @@ export class AgentGateway implements OnGatewayDisconnect {
 
   @SubscribeMessage(WS_EVENTS.TASK_FAILED)
   async handleTaskFailed(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    return this.forwardDesktopEvent(client, async () => {
+    return this.forwardDesktopEvent(client, async (binding) => {
+      if (!(await this.shouldPersist(binding.deviceId))) {
+        const relayPayload = this.taskService.toRelayTaskFailed(payload);
+        this.emitToClientType(binding.deviceId, "mobile", WS_EVENTS.TASK_FAILED, relayPayload);
+        return relayPayload;
+      }
+
       const result = await this.taskService.markFailed(payload);
       this.emitToClientType(result.deviceId, "mobile", WS_EVENTS.TASK_FAILED, result.payload);
       return result.payload;
@@ -162,7 +210,18 @@ export class AgentGateway implements OnGatewayDisconnect {
   @SubscribeMessage(WS_EVENTS.TASK_CANCEL)
   async handleTaskCancel(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
     try {
-      this.deviceConnectionService.requireSocketBinding(client.id);
+      const binding = this.deviceConnectionService.requireSocketBinding(client.id);
+      if (!(await this.shouldPersist(binding.deviceId))) {
+        const relayPayload = this.taskService.toRelayTaskCancel(payload);
+        if (relayPayload.deviceId !== binding.deviceId) {
+          throw new WsException("task.cancel deviceId must match the registered device");
+        }
+
+        this.emitToClientType(binding.deviceId, "desktop", WS_EVENTS.TASK_CANCEL, relayPayload);
+        this.emitToClientType(binding.deviceId, "mobile", WS_EVENTS.TASK_CANCEL, relayPayload);
+        return relayPayload;
+      }
+
       const result = await this.taskService.cancelTask(payload);
 
       this.emitToClientType(result.deviceId, "desktop", WS_EVENTS.TASK_CANCEL, result.payload);
@@ -176,14 +235,18 @@ export class AgentGateway implements OnGatewayDisconnect {
 
   private async forwardDesktopEvent<Payload>(
     client: Socket,
-    handler: () => Promise<Payload>
+    handler: (binding: { deviceId: string; clientType: ClientType }) => Promise<Payload>
   ): Promise<Payload> {
     try {
-      this.deviceConnectionService.requireSocketBinding(client.id, "desktop");
-      return await handler();
+      const binding = this.deviceConnectionService.requireSocketBinding(client.id, "desktop");
+      return await handler(binding);
     } catch (error) {
       throw this.toWsException(error);
     }
+  }
+
+  private async shouldPersist(deviceId: string) {
+    return (await this.deviceConnectionService.getServerPersistenceMode(deviceId)) === "persist";
   }
 
   private emitToClientType<EventName extends ServerToClientEventName>(

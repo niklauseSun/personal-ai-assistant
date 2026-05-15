@@ -48,6 +48,31 @@ describe("TaskService", () => {
     );
   });
 
+  it("creates transient relay-only task payloads without storing history", async () => {
+    const created = service.createTransientTask({
+      deviceId: "binding-relay",
+      prompt: "Run without server history",
+      requestId: "task-relay",
+      metadata: {
+        workspacePath: "/tmp/project"
+      }
+    });
+    const approval = service.toRelayApproval({
+      taskId: "task-relay",
+      approvalRequestId: "approval-relay",
+      deviceId: "binding-relay",
+      decision: "approved"
+    });
+
+    assert.equal(created.task.id, "task-relay");
+    assert.equal(created.task.status, "created");
+    assert.equal(created.task.metadata?.workspacePath, "/tmp/project");
+    assert.equal(approval.resultPayload.status, "approved");
+    assert.equal(await prisma.agentTask.count(), 0);
+    assert.equal(await prisma.taskEvent.count(), 0);
+    assert.equal(await prisma.approvalResult.count(), 0);
+  });
+
   it("stores output, approval, completion, and history events", async () => {
     const created = await service.createTask({
       deviceId: "binding-2",

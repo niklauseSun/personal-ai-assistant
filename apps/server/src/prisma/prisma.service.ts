@@ -1,12 +1,13 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
-import path from "node:path";
+
+const DEFAULT_DATABASE_URL =
+  "postgresql://postgres:postgres@localhost:5432/personal_ai_assistant?schema=public";
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
-    const databaseUrl =
-      process.env.DATABASE_URL ?? `file:${path.join(process.cwd(), "prisma/dev.db")}`;
+    const databaseUrl = process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL;
 
     super({
       datasources: {

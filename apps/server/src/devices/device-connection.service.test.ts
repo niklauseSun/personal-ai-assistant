@@ -39,6 +39,21 @@ describe("DeviceConnectionService", () => {
       deviceId: "binding-1",
       clientType: "desktop"
     });
+    assert.equal(await service.getServerPersistenceMode("binding-1"), "persist");
+  });
+
+  it("tracks relay-only server persistence mode from desktop metadata", async () => {
+    const desktop = await service.register("socket-desktop", {
+      deviceId: "binding-relay",
+      deviceName: "MacBook",
+      clientType: "desktop",
+      metadata: {
+        serverPersistence: "relay_only"
+      }
+    });
+
+    assert.equal(desktop.session.metadata?.serverPersistence, "relay_only");
+    assert.equal(await service.getServerPersistenceMode("binding-relay"), "relay_only");
   });
 
   it("marks a disconnected socket offline", async () => {

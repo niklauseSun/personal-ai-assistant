@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import type {
   AgentTaskHistory,
   AgentTask,
@@ -101,6 +102,69 @@ export class TaskService {
 
     await this.recordEvent(task.id, WS_EVENTS.TASK_CREATED, response);
     return response;
+  }
+
+  createTransientTask(rawPayload: unknown): TaskCreatedPayload {
+    const payload = this.parseTaskCreatePayload(rawPayload);
+    const now = new Date().toISOString();
+
+    return {
+      task: {
+        id: payload.requestId ?? randomUUID(),
+        prompt: payload.prompt,
+        status: "created",
+        createdByDeviceId: payload.deviceId,
+        assignedDesktopDeviceId: payload.deviceId,
+        createdAt: now,
+        updatedAt: now,
+        metadata: payload.metadata
+      }
+    };
+  }
+
+  toRelayTaskStarted(rawPayload: unknown): TaskStartedPayload {
+    return this.parseTaskStartedPayload(rawPayload);
+  }
+
+  toRelayTaskOutput(rawPayload: unknown): TaskOutputPayload {
+    return this.parseTaskOutputPayload(rawPayload);
+  }
+
+  toRelayTaskWaitingApproval(rawPayload: unknown): TaskWaitingApprovalPayload {
+    return this.parseTaskWaitingApprovalPayload(rawPayload);
+  }
+
+  toRelayTaskCompleted(rawPayload: unknown): TaskCompletedPayload {
+    return this.parseTaskCompletedPayload(rawPayload);
+  }
+
+  toRelayTaskFailed(rawPayload: unknown): TaskFailedPayload {
+    return this.parseTaskFailedPayload(rawPayload);
+  }
+
+  toRelayTaskCancel(rawPayload: unknown): TaskCancelPayload {
+    return this.parseTaskCancelPayload(rawPayload);
+  }
+
+  toRelayApproval(rawPayload: unknown): {
+    submitPayload: TaskApprovalSubmitPayload;
+    resultPayload: TaskApprovalResultPayload;
+  } {
+    const submitPayload = this.parseTaskApprovalSubmitPayload(rawPayload);
+    const resolvedAt = new Date().toISOString();
+
+    return {
+      submitPayload,
+      resultPayload: {
+        taskId: submitPayload.taskId,
+        approvalRequestId: submitPayload.approvalRequestId,
+        status: submitPayload.decision,
+        decision: submitPayload.decision,
+        resolvedByDeviceId: submitPayload.deviceId,
+        resolvedAt,
+        reason: submitPayload.reason
+      }
+    };
   }
 
   async markStarted(

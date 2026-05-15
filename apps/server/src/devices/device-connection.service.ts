@@ -2,13 +2,15 @@ import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import type {
   ClientType,
   DeviceOnlinePayload,
-  DeviceRegisterPayload
+  DeviceRegisterPayload,
+  ServerPersistenceMode
 } from "@personal-ai-assistant/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import {
   assertObject,
   optionalRecord,
   optionalString,
+  parseMetadata,
   requireString,
   stringifyMetadata
 } from "../common/payload";
@@ -21,6 +23,7 @@ interface SocketBinding {
 @Injectable()
 export class DeviceConnectionService {
   private readonly socketBindings = new Map<string, SocketBinding>();
+  private readonly serverPersistenceModes = new Map<string, ServerPersistenceMode>();
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
@@ -31,6 +34,14 @@ export class DeviceConnectionService {
   async register(socketId: string, rawPayload: unknown): Promise<DeviceOnlinePayload> {
     const payload = this.parseRegisterPayload(rawPayload);
     const now = new Date();
+    const serverPersistence = this.parseServerPersistenceMode(payload.metadata?.serverPersistence);
+    const metadata =
+      payload.clientType === "desktop"
+        ? {
+            ...payload.metadata,
+            serverPersistence
+          }
+        : payload.metadata;
 
     const session = await this.prisma.deviceSession.upsert({
       where: {
@@ -46,7 +57,7 @@ export class DeviceConnectionService {
         socketId,
         status: "online",
         clientVersion: payload.clientVersion,
-        metadataJson: stringifyMetadata(payload.metadata),
+        metadataJson: stringifyMetadata(metadata),
         registeredAt: now,
         lastSeenAt: now
       },
@@ -55,7 +66,7 @@ export class DeviceConnectionService {
         socketId,
         status: "online",
         clientVersion: payload.clientVersion,
-        metadataJson: stringifyMetadata(payload.metadata),
+        metadataJson: stringifyMetadata(metadata),
         lastSeenAt: now
       }
     });
@@ -64,6 +75,10 @@ export class DeviceConnectionService {
       deviceId: payload.deviceId,
       clientType: payload.clientType
     });
+
+    if (payload.clientType === "desktop") {
+      this.serverPersistenceModes.set(payload.deviceId, serverPersistence);
+    }
 
     return {
       session: {
@@ -75,7 +90,7 @@ export class DeviceConnectionService {
         connectionId: socketId,
         registeredAt: session.registeredAt.toISOString(),
         lastSeenAt: session.lastSeenAt.toISOString(),
-        metadata: payload.metadata
+        metadata
       },
       serverTime: now.toISOString()
     };
@@ -98,6 +113,27 @@ export class DeviceConnectionService {
 
   getSocketBinding(socketId: string): SocketBinding | undefined {
     return this.socketBindings.get(socketId);
+  }
+
+  async getServerPersistenceMode(deviceId: string): Promise<ServerPersistenceMode> {
+    const cached = this.serverPersistenceModes.get(deviceId);
+    if (cached) {
+      return cached;
+    }
+
+    const session = await this.prisma.deviceSession.findUnique({
+      where: {
+        deviceId_clientType: {
+          deviceId,
+          clientType: "desktop"
+        }
+      }
+    });
+    const mode = this.parseServerPersistenceMode(
+      parseMetadata(session?.metadataJson ?? null)?.serverPersistence
+    );
+    this.serverPersistenceModes.set(deviceId, mode);
+    return mode;
   }
 
   requireSocketBinding(socketId: string, expectedClientType?: ClientType): SocketBinding {
@@ -128,5 +164,17 @@ export class DeviceConnectionService {
       clientVersion: optionalString(rawPayload.clientVersion, "clientVersion"),
       metadata: optionalRecord(rawPayload.metadata, "metadata")
     };
+  }
+
+  private parseServerPersistenceMode(value: unknown): ServerPersistenceMode {
+    if (value === undefined || value === null) {
+      return "persist";
+    }
+
+    if (value === "persist" || value === "relay_only") {
+      return value;
+    }
+
+    throw new BadRequestException("metadata.serverPersistence must be persist or relay_only");
   }
 }

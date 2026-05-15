@@ -1,47 +1,47 @@
-import { app, BrowserWindow } from "electron";
-import os from "node:os";
+import { app, BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
-import { CodexRunner } from "./codex-runner";
-import { DesktopApiClient } from "./desktop-api-client";
-import { DesktopWebSocketClient } from "./desktop-websocket-client";
+import type { DesktopAppConfig } from "@personal-ai-assistant/shared";
+import { DesktopBackendManager } from "./desktop-backend-manager";
+import { DesktopConfigStore } from "./desktop-config-store";
 import { Logger } from "./logger";
-import { TaskRuntimeManager } from "./task-runtime-manager";
 
-let desktopClient: DesktopWebSocketClient | undefined;
-let runtimeManager: TaskRuntimeManager | undefined;
+let backendManager: DesktopBackendManager | undefined;
+let configStore: DesktopConfigStore | undefined;
+let currentConfig: DesktopAppConfig | undefined;
 
-function startDesktopBackend() {
+async function startDesktopBackend() {
   const logger = new Logger("main");
-  const deviceId = process.env.DESKTOP_DEVICE_ID?.trim() || os.hostname();
-  const deviceName = process.env.DESKTOP_DEVICE_NAME?.trim() || os.hostname();
-  const serverUrl = process.env.SERVER_WS_URL?.trim() || "http://localhost:3000";
-  const workspacePath = process.env.CODEX_WORKSPACE_PATH?.trim();
+  configStore = new DesktopConfigStore(app.getPath("userData"));
+  currentConfig = await configStore.load();
 
-  if (!workspacePath) {
+  if (!currentConfig.defaultWorkspacePath) {
     logger.warn("CODEX_WORKSPACE_PATH is not set; tasks must provide metadata.workspacePath");
   }
 
-  desktopClient = new DesktopWebSocketClient({
-    serverUrl,
-    deviceId,
-    deviceName,
-    clientVersion: app.getVersion(),
-    logger: new Logger("websocket")
+  backendManager = new DesktopBackendManager(app.getVersion(), new Logger("backend"));
+  backendManager.start(currentConfig);
+}
+
+function registerIpcHandlers() {
+  ipcMain.handle("desktop-config:get", async () => {
+    if (!configStore) {
+      configStore = new DesktopConfigStore(app.getPath("userData"));
+    }
+
+    currentConfig = currentConfig ?? (await configStore.load());
+    return currentConfig;
   });
 
-  runtimeManager = new TaskRuntimeManager({
-    client: desktopClient,
-    runner: new CodexRunner({
-      logger: new Logger("codex-runner")
-    }),
-    defaultWorkspacePath: workspacePath,
-    deviceId,
-    historyClient: new DesktopApiClient(serverUrl),
-    logger: new Logger("runtime")
-  });
+  ipcMain.handle("desktop-config:save", async (_event, rawConfig: unknown) => {
+    if (!configStore) {
+      configStore = new DesktopConfigStore(app.getPath("userData"));
+    }
 
-  runtimeManager.attach();
-  desktopClient.connect();
+    const nextConfig = await configStore.save(rawConfig);
+    currentConfig = nextConfig;
+    backendManager?.replaceConfig(nextConfig);
+    return nextConfig;
+  });
 }
 
 function createWindow() {
@@ -65,8 +65,9 @@ function createWindow() {
   void window.loadFile(path.join(__dirname, "../renderer/index.html"));
 }
 
-void app.whenReady().then(() => {
-  startDesktopBackend();
+void app.whenReady().then(async () => {
+  registerIpcHandlers();
+  await startDesktopBackend();
   createWindow();
 
   app.on("activate", () => {
@@ -83,6 +84,5 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  runtimeManager?.cancelActiveTask();
-  desktopClient?.disconnect();
+  backendManager?.stopAll();
 });

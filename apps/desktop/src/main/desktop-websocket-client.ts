@@ -7,6 +7,7 @@ import type {
   TaskCreatedPayload,
   TaskFailedPayload,
   TaskOutputPayload,
+  ServerPersistenceMode,
   TaskStartedPayload,
   TaskWaitingApprovalPayload
 } from "@personal-ai-assistant/shared";
@@ -19,6 +20,7 @@ export interface DesktopWebSocketClientOptions {
   deviceId: string;
   deviceName?: string;
   clientVersion?: string;
+  serverPersistence?: ServerPersistenceMode;
   logger?: Logger;
 }
 
@@ -106,7 +108,10 @@ export class DesktopWebSocketClient {
         deviceId: this.options.deviceId,
         clientType: "desktop",
         deviceName: this.options.deviceName,
-        clientVersion: this.options.clientVersion
+        clientVersion: this.options.clientVersion,
+        metadata: {
+          serverPersistence: this.options.serverPersistence ?? "persist"
+        }
       });
     });
 
