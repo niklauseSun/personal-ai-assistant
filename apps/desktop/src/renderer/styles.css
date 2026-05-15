@@ -15,7 +15,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -137,11 +138,13 @@ fieldset {
 }
 
 input[type="text"],
-input:not([type]) {
+input:not([type]),
+textarea {
   width: 100%;
 }
 
-input {
+input,
+textarea {
   background: #ffffff;
   border: 1px solid #c8d0dc;
   border-radius: 8px;
@@ -151,12 +154,19 @@ input {
   padding: 9px 11px;
 }
 
-input:focus {
+textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+input:focus,
+textarea:focus {
   border-color: #25636f;
   box-shadow: 0 0 0 3px rgba(37, 99, 111, 0.14);
 }
 
-input:disabled {
+input:disabled,
+textarea:disabled {
   background: #eef2f7;
   color: #6b7280;
 }
@@ -164,6 +174,11 @@ input:disabled {
 .binding-list {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+.button-row {
+  display: flex;
   gap: 10px;
 }
 
@@ -300,6 +315,60 @@ input:disabled {
   color: #be123c;
 }
 
+.modal-backdrop {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.42);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 20;
+}
+
+.pairing-dialog {
+  background: #ffffff;
+  border-radius: 8px;
+  max-width: 760px;
+  padding: 20px;
+  width: min(100%, 760px);
+}
+
+.pairing-body {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.qr-frame {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  min-height: 300px;
+  padding: 18px;
+}
+
+.qr-frame img {
+  display: block;
+  height: 260px;
+  width: 260px;
+}
+
+.qr-placeholder {
+  color: #5f6b7a;
+  font-size: 14px;
+  text-align: center;
+}
+
+.pairing-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 @media (max-width: 760px) {
   .shell {
     padding: 18px;
@@ -319,5 +388,14 @@ input:disabled {
   .button,
   .status-pill {
     width: 100%;
+  }
+
+  .button-row,
+  .pairing-body {
+    flex-direction: column;
+  }
+
+  .pairing-body {
+    display: flex;
   }
 }

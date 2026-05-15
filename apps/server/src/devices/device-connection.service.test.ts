@@ -3,6 +3,8 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { PrismaService } from "../prisma/prisma.service";
 import { DeviceConnectionService } from "./device-connection.service";
 
+process.env.SERVER_STORAGE_MODE = "persist";
+
 describe("DeviceConnectionService", () => {
   const prisma = new PrismaService();
   const service = new DeviceConnectionService(prisma);
@@ -34,12 +36,47 @@ describe("DeviceConnectionService", () => {
     assert.equal(desktop.session.deviceId, "binding-1");
     assert.equal(desktop.session.clientType, "desktop");
     assert.equal(desktop.session.deviceName, "MacBook");
+    assert.equal(desktop.session.metadata?.desktopId, "binding-1");
     assert.equal(mobile.session.clientType, "mobile");
-    assert.deepEqual(service.getSocketBinding("socket-desktop"), {
-      deviceId: "binding-1",
-      clientType: "desktop"
+    const desktopBinding = service.getSocketBinding("socket-desktop");
+    assert.equal(desktopBinding?.deviceId, "binding-1");
+    assert.equal(desktopBinding?.clientType, "desktop");
+    assert.equal(desktopBinding?.desktopId, "binding-1");
+    assert.equal(await service.getServerPersistenceMode("binding-1"), "relay_only");
+  });
+
+  it("tracks multiple online desktop bindings for one mobile deviceId", async () => {
+    await service.register("socket-desktop-a", {
+      deviceId: "shared-mobile",
+      deviceName: "Mac Studio",
+      clientType: "desktop",
+      metadata: {
+        desktopId: "desktop-a"
+      }
     });
-    assert.equal(await service.getServerPersistenceMode("binding-1"), "persist");
+    await service.register("socket-desktop-b", {
+      deviceId: "shared-mobile",
+      deviceName: "ThinkPad",
+      clientType: "desktop",
+      metadata: {
+        desktopId: "desktop-b",
+        serverPersistence: "relay_only"
+      }
+    });
+
+    const desktops = service.listDesktopBindings("shared-mobile");
+    assert.deepEqual(
+      desktops.map((desktop) => desktop.desktopId).sort(),
+      ["desktop-a", "desktop-b"]
+    );
+    assert.equal(
+      await service.getServerPersistenceMode("shared-mobile", "desktop-a"),
+      "relay_only"
+    );
+    assert.equal(
+      await service.getServerPersistenceMode("shared-mobile", "desktop-b"),
+      "relay_only"
+    );
   });
 
   it("tracks relay-only server persistence mode from desktop metadata", async () => {
@@ -59,7 +96,10 @@ describe("DeviceConnectionService", () => {
   it("marks a disconnected socket offline", async () => {
     await service.register("socket-desktop", {
       deviceId: "binding-2",
-      clientType: "desktop"
+      clientType: "desktop",
+      metadata: {
+        serverPersistence: "persist"
+      }
     });
 
     await service.markDisconnected("socket-desktop");

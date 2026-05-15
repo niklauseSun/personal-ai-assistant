@@ -1,6 +1,5 @@
 import type { DesktopAppConfig, DesktopMobileBinding } from "@personal-ai-assistant/shared";
 import { CodexRunner } from "./codex-runner";
-import { DesktopApiClient } from "./desktop-api-client";
 import { DesktopWebSocketClient } from "./desktop-websocket-client";
 import { Logger } from "./logger";
 import { TaskRuntimeManager } from "./task-runtime-manager";
@@ -62,9 +61,10 @@ export class DesktopBackendManager {
     const client = new DesktopWebSocketClient({
       serverUrl: config.serverUrl,
       deviceId: binding.deviceId,
+      desktopId: binding.id,
       deviceName: this.bindingDeviceName(config, binding),
       clientVersion: this.appVersion,
-      serverPersistence: config.serverPersistence,
+      serverPersistence: "relay_only",
       logger: new Logger(`${loggerContext}:websocket`)
     });
     const runtimeManager = new TaskRuntimeManager({
@@ -74,8 +74,6 @@ export class DesktopBackendManager {
       }),
       defaultWorkspacePath: config.defaultWorkspacePath,
       deviceId: binding.deviceId,
-      historyClient:
-        config.serverPersistence === "persist" ? new DesktopApiClient(config.serverUrl) : undefined,
       logger: new Logger(`${loggerContext}:runtime`)
     });
 

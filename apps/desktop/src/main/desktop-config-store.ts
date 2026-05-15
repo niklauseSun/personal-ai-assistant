@@ -4,8 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type {
   DesktopAppConfig,
-  DesktopMobileBinding,
-  ServerPersistenceMode
+  DesktopMobileBinding
 } from "@personal-ai-assistant/shared";
 
 const CONFIG_FILE_NAME = "desktop-config.json";
@@ -45,7 +44,7 @@ export class DesktopConfigStore {
     return {
       serverUrl: process.env.SERVER_WS_URL?.trim() || "http://localhost:3000",
       desktopName: process.env.DESKTOP_DEVICE_NAME?.trim() || os.hostname(),
-      serverPersistence: parseServerPersistenceMode(process.env.SERVER_PERSISTENCE_MODE) ?? "persist",
+      serverPersistence: "relay_only",
       defaultWorkspacePath: optionalTrimmedString(process.env.CODEX_WORKSPACE_PATH),
       bindings: [
         {
@@ -66,15 +65,13 @@ export function normalizeConfig(rawConfig: unknown, fallback: DesktopAppConfig):
   const now = new Date().toISOString();
   const desktopName = optionalTrimmedString(raw.desktopName) || fallback.desktopName;
   const serverUrl = optionalTrimmedString(raw.serverUrl) || fallback.serverUrl;
-  const serverPersistence =
-    parseServerPersistenceMode(raw.serverPersistence) ?? fallback.serverPersistence;
   const defaultWorkspacePath = optionalTrimmedString(raw.defaultWorkspacePath);
   const bindings = normalizeBindings(raw.bindings, fallback.bindings, now);
 
   return {
     serverUrl,
     desktopName,
-    serverPersistence,
+    serverPersistence: "relay_only",
     defaultWorkspacePath,
     bindings
   };
@@ -115,14 +112,6 @@ function normalizeBindings(
 
 function optionalTrimmedString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function parseServerPersistenceMode(value: unknown): ServerPersistenceMode | undefined {
-  if (value === "persist" || value === "relay_only") {
-    return value;
-  }
-
-  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

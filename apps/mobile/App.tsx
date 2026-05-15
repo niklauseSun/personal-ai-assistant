@@ -1,21 +1,38 @@
-import type { AgentTaskStatus } from "@personal-ai-assistant/shared";
+import type {
+  AgentTask,
+  AgentTaskStatus,
+  DeviceSession,
+  MobileBoundDesktop
+} from "@personal-ai-assistant/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   Pressable,
   SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View
 } from "react-native";
-import { ApiClient } from "./src/api/api-client";
 import { MobileWebSocketClient } from "./src/api/mobile-websocket-client";
+import { BoundDesktopDrawer } from "./src/screens/BoundDesktopDrawer";
 import { CreateTaskScreen } from "./src/screens/CreateTaskScreen";
+import { ScanBindingScreen } from "./src/screens/ScanBindingScreen";
 import { TaskDetailScreen } from "./src/screens/TaskDetailScreen";
 import { TaskListScreen } from "./src/screens/TaskListScreen";
+import {
+  boundDesktopFromPairingPayload,
+  loadDesktopBindingState,
+  parsePairingPayload,
+  saveDesktopBindingState,
+  upsertBoundDesktop
+} from "./src/store/desktop-binding-storage";
+import { loadTaskHistoryFromDatabase } from "./src/store/task-history-db";
 import { useTaskStore } from "./src/store/task-store";
 import { colors, sharedStyles } from "./src/ui/styles";
 import { toDisplayTaskStatus } from "./src/utils/status";
@@ -30,10 +47,70 @@ export interface HistoryFilters {
 interface OutputPageState {
   hasMore: boolean;
   isLoading: boolean;
-  nextCursor?: string;
 }
 
-const OUTPUT_PAGE_LIMIT = 100;
+function getDesktopId(session: DeviceSession) {
+  const desktopId = session.metadata?.desktopId;
+  return typeof desktopId === "string" && desktopId.trim() ? desktopId.trim() : undefined;
+}
+
+function createLocalTaskId() {
+  return `task-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function filterLocalTasks(
+  tasks: AgentTask[],
+  filters: HistoryFilters,
+  deviceId: string | undefined,
+  desktopId: string | undefined
+) {
+  const normalizedPrompt = filters.prompt.trim().toLowerCase();
+  const createdFrom = parseOptionalTime(filters.createdFrom);
+  const createdTo = parseOptionalTime(filters.createdTo);
+
+  return tasks.filter((task) => {
+    if (deviceId && task.createdByDeviceId !== deviceId) {
+      return false;
+    }
+
+    if (
+      desktopId &&
+      task.assignedDesktopDeviceId &&
+      task.assignedDesktopDeviceId !== desktopId
+    ) {
+      return false;
+    }
+
+    if (filters.status !== "all" && task.status !== filters.status) {
+      return false;
+    }
+
+    if (normalizedPrompt && !task.prompt.toLowerCase().includes(normalizedPrompt)) {
+      return false;
+    }
+
+    const createdAt = Date.parse(task.createdAt);
+    if (createdFrom !== undefined && createdAt < createdFrom) {
+      return false;
+    }
+
+    if (createdTo !== undefined && createdAt > createdTo) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function parseOptionalTime(value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const time = Date.parse(normalized);
+  return Number.isNaN(time) ? undefined : time;
+}
 
 export default function App() {
   const clientRef = useRef(new MobileWebSocketClient());
@@ -60,10 +137,85 @@ export default function App() {
     createdTo: ""
   });
   const [outputPages, setOutputPages] = useState<Record<string, OutputPageState>>({});
+  const [desktopSessions, setDesktopSessions] = useState<DeviceSession[]>([]);
+  const [boundDesktops, setBoundDesktops] = useState<MobileBoundDesktop[]>([]);
+  const [activeBoundDesktopId, setActiveBoundDesktopId] = useState<string>();
+  const [isDesktopDrawerOpen, setDesktopDrawerOpen] = useState(false);
+  const [isLoadingDesktopBindings, setDesktopBindingsLoading] = useState(true);
 
   useEffect(() => {
     return () => {
       clientRef.current.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    useTaskStore.getState().setHistoryLoading(true);
+    loadTaskHistoryFromDatabase()
+      .then((snapshot) => {
+        if (!isMounted) {
+          return;
+        }
+
+        useTaskStore.getState().hydrateTaskHistory(snapshot);
+        useTaskStore.getState().setError(undefined);
+      })
+      .catch((error) => {
+        if (isMounted) {
+          useTaskStore
+            .getState()
+            .setError(error instanceof Error ? error.message : "Failed to load SQLite history");
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          useTaskStore.getState().setHistoryLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    loadDesktopBindingState()
+      .then((state) => {
+        if (!isMounted) {
+          return;
+        }
+
+        setBoundDesktops(state.bindings);
+        const defaultDesktop =
+          state.bindings.find((desktop) => desktop.id === state.lastUsedDesktopId) ??
+          state.bindings[0];
+
+        if (defaultDesktop) {
+          setActiveBoundDesktopId(defaultDesktop.id);
+          setServerUrlInput(defaultDesktop.serverUrl);
+          setDeviceIdInput(defaultDesktop.deviceId);
+          useTaskStore.getState().setConfig({
+            serverUrl: defaultDesktop.serverUrl,
+            deviceId: defaultDesktop.deviceId
+          });
+        }
+        setDesktopBindingsLoading(false);
+      })
+      .catch((error) => {
+        if (isMounted) {
+          useTaskStore
+            .getState()
+            .setError(error instanceof Error ? error.message : "Failed to load desktop bindings");
+          setDesktopBindingsLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
     };
   }, []);
 
@@ -75,132 +227,103 @@ export default function App() {
   const selectedOutputs = selectedTaskId ? outputsByTaskId[selectedTaskId] ?? [] : [];
   const selectedApprovals = selectedTaskId ? approvalsByTaskId[selectedTaskId] ?? [] : [];
   const selectedOutputPage = selectedTaskId ? outputPages[selectedTaskId] : undefined;
+  const activeBoundDesktop = useMemo(
+    () => boundDesktops.find((desktop) => desktop.id === activeBoundDesktopId),
+    [activeBoundDesktopId, boundDesktops]
+  );
+  const availableDesktops = useMemo(
+    () => {
+      const byId = new Map<string, { desktopId: string; label: string }>();
+      if (activeBoundDesktop) {
+        byId.set(activeBoundDesktop.desktopId, {
+          desktopId: activeBoundDesktop.desktopId,
+          label: activeBoundDesktop.desktopName
+        });
+      }
+
+      for (const session of desktopSessions) {
+        const desktopId = getDesktopId(session);
+        if (!desktopId) {
+          continue;
+        }
+
+        byId.set(desktopId, {
+          desktopId,
+          label: session.deviceName ?? desktopId
+        });
+      }
+
+      return Array.from(byId.values());
+    },
+    [activeBoundDesktop, desktopSessions]
+  );
+  const visibleTasks = useMemo(
+    () =>
+      filterLocalTasks(
+        tasks,
+        historyFilters,
+        activeBoundDesktop?.deviceId ?? deviceId,
+        activeBoundDesktop?.desktopId
+      ),
+    [activeBoundDesktop, deviceId, historyFilters, tasks]
+  );
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gestureState) =>
+          Math.abs(gestureState.dx) > 48 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4,
+        onPanResponderRelease: (_event, gestureState) => {
+          if (gestureState.dx < -70) {
+            setDesktopDrawerOpen(true);
+          }
+
+          if (gestureState.dx > 70) {
+            setDesktopDrawerOpen(false);
+          }
+        }
+      }),
+    []
+  );
   const canRun = connectionStatus === "connected";
   const canCancel = selectedTask
     ? ["created", "running", "started", "waiting_approval"].includes(selectedTask.status)
     : false;
 
-  const loadHistory = async (
-    url = serverUrlInput,
-    id = deviceIdInput,
-    filters = historyFilters
-  ) => {
-    const normalizedUrl = url.trim();
-    const normalizedDeviceId = id.trim();
-    if (!normalizedUrl || !normalizedDeviceId) {
-      return;
-    }
-
-    useTaskStore.getState().setHistoryLoading(true);
-    try {
-      const api = new ApiClient(normalizedUrl);
-      const historyTasks = await api.listTasks({
-        deviceId: normalizedDeviceId,
-        status: filters.status,
-        prompt: filters.prompt,
-        createdFrom: filters.createdFrom,
-        createdTo: filters.createdTo,
-        limit: 50
-      });
-      useTaskStore.getState().setTasks(historyTasks.items);
-      useTaskStore.getState().setError(undefined);
-    } catch (error) {
-      useTaskStore
-        .getState()
-        .setError(error instanceof Error ? error.message : "Failed to load task history");
-    } finally {
-      useTaskStore.getState().setHistoryLoading(false);
-    }
+  const applyLocalHistoryFilters = () => {
+    useTaskStore.getState().setHistoryLoading(false);
+    useTaskStore.getState().setError(undefined);
   };
 
-  const loadTaskDetail = async (taskId: string) => {
+  const loadTaskDetail = (taskId: string) => {
     setOutputPages((state) => ({
       ...state,
       [taskId]: {
-        ...state[taskId],
-        hasMore: state[taskId]?.hasMore ?? false,
-        isLoading: true
+        hasMore: false,
+        isLoading: false
       }
     }));
-
-    try {
-      const api = new ApiClient(useTaskStore.getState().serverUrl);
-      const history = await api.getTask(taskId, { limit: OUTPUT_PAGE_LIMIT });
-      useTaskStore.getState().upsertTask(history.task);
-      useTaskStore.getState().setOutputs(taskId, history.outputsPage.items);
-      useTaskStore.getState().setApprovals(taskId, history.approvals);
-      setOutputPages((state) => ({
-        ...state,
-        [taskId]: {
-          hasMore: history.outputsPage.hasMore,
-          isLoading: false,
-          nextCursor: history.outputsPage.nextCursor
-        }
-      }));
-      useTaskStore.getState().setError(undefined);
-    } catch (error) {
-      useTaskStore
-        .getState()
-        .setError(error instanceof Error ? error.message : "Failed to load task detail");
-      setOutputPages((state) => ({
-        ...state,
-        [taskId]: {
-          ...state[taskId],
-          hasMore: state[taskId]?.hasMore ?? false,
-          isLoading: false
-        }
-      }));
-    }
+    useTaskStore.getState().setError(undefined);
   };
 
-  const loadMoreOutputs = async (taskId: string) => {
-    const page = outputPages[taskId];
-    if (!page?.hasMore || page.isLoading) {
-      return;
-    }
-
+  const loadMoreOutputs = (taskId: string) => {
     setOutputPages((state) => ({
       ...state,
       [taskId]: {
-        ...state[taskId],
-        isLoading: true
+        hasMore: false,
+        isLoading: false
       }
     }));
-
-    try {
-      const api = new ApiClient(useTaskStore.getState().serverUrl);
-      const nextPage = await api.listOutputs(taskId, {
-        cursor: page.nextCursor,
-        limit: OUTPUT_PAGE_LIMIT
-      });
-      useTaskStore.getState().mergeOutputs(taskId, nextPage.items);
-      setOutputPages((state) => ({
-        ...state,
-        [taskId]: {
-          hasMore: nextPage.hasMore,
-          isLoading: false,
-          nextCursor: nextPage.nextCursor
-        }
-      }));
-      useTaskStore.getState().setError(undefined);
-    } catch (error) {
-      useTaskStore
-        .getState()
-        .setError(error instanceof Error ? error.message : "Failed to load more output");
-      setOutputPages((state) => ({
-        ...state,
-        [taskId]: {
-          ...state[taskId],
-          hasMore: state[taskId]?.hasMore ?? false,
-          isLoading: false
-        }
-      }));
-    }
+    useTaskStore.getState().setError("All output is already loaded from local history.");
   };
 
   const connect = () => {
-    const normalizedServerUrl = serverUrlInput.trim();
-    const normalizedDeviceId = deviceIdInput.trim();
+    connectTo(serverUrlInput, deviceIdInput);
+  };
+
+  const connectTo = (rawServerUrl: string, rawDeviceId: string) => {
+    const normalizedServerUrl = rawServerUrl.trim();
+    const normalizedDeviceId = rawDeviceId.trim();
 
     if (!normalizedServerUrl) {
       Alert.alert("Missing server URL", "Enter the server URL before connecting.");
@@ -216,20 +339,50 @@ export default function App() {
       serverUrl: normalizedServerUrl,
       deviceId: normalizedDeviceId
     });
+    setServerUrlInput(normalizedServerUrl);
+    setDeviceIdInput(normalizedDeviceId);
     useTaskStore.getState().setError(undefined);
+    setDesktopSessions([]);
 
     clientRef.current.connect({
       serverUrl: normalizedServerUrl,
       deviceId: normalizedDeviceId,
       handlers: {
         onConnectionStatus: (status) => useTaskStore.getState().setConnectionStatus(status),
-        onDeviceOnline: () =>
-          void loadHistory(normalizedServerUrl, normalizedDeviceId, historyFilters),
+        onDeviceOnline: (payload) => {
+          if (payload.session.clientType === "desktop") {
+            const desktopId = getDesktopId(payload.session);
+            if (desktopId) {
+              if (payload.session.status === "offline") {
+                setDesktopSessions((current) =>
+                  current.filter((session) => getDesktopId(session) !== desktopId)
+                );
+                return;
+              }
+
+              setDesktopSessions((current) => {
+                const withoutCurrent = current.filter(
+                  (session) => getDesktopId(session) !== desktopId
+                );
+                return [...withoutCurrent, payload.session].sort((left, right) =>
+                  (left.deviceName ?? "").localeCompare(right.deviceName ?? "")
+                );
+              });
+            }
+            return;
+          }
+
+          applyLocalHistoryFilters();
+        },
         onError: (message) => useTaskStore.getState().setError(message),
         onTask: (task) => useTaskStore.getState().upsertTask(task),
         onOutput: (chunk) => useTaskStore.getState().appendOutput(chunk),
         onApproval: (approval) => useTaskStore.getState().upsertApproval(approval),
-        onApprovalResult: (result) => useTaskStore.getState().applyApprovalResult(result)
+        onApprovalResult: (result) => useTaskStore.getState().applyApprovalResult(result),
+        onRelayFailed: (failure) => {
+          useTaskStore.getState().applyRelayFailure(failure);
+          useTaskStore.getState().setError(failure.error.message);
+        }
       }
     });
   };
@@ -239,10 +392,134 @@ export default function App() {
     useTaskStore.getState().setConnectionStatus("disconnected");
   };
 
-  const createTask = (input: { workspacePath: string; prompt: string }) => {
+  const selectBoundDesktop = (desktop: MobileBoundDesktop, shouldConnect = true) => {
+    const nextDesktop = {
+      ...desktop,
+      lastUsedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    const nextDesktops = upsertBoundDesktop(boundDesktops, nextDesktop);
+
+    setBoundDesktops(nextDesktops);
+    setActiveBoundDesktopId(nextDesktop.id);
+    setDesktopDrawerOpen(false);
+    setServerUrlInput(nextDesktop.serverUrl);
+    setDeviceIdInput(nextDesktop.deviceId);
+    useTaskStore.getState().setConfig({
+      serverUrl: nextDesktop.serverUrl,
+      deviceId: nextDesktop.deviceId
+    });
+    void saveDesktopBindingState({
+      bindings: nextDesktops,
+      lastUsedDesktopId: nextDesktop.id
+    }).catch((error) =>
+      useTaskStore
+        .getState()
+        .setError(error instanceof Error ? error.message : "Failed to save desktop binding")
+    );
+
+    if (shouldConnect) {
+      connectTo(nextDesktop.serverUrl, nextDesktop.deviceId);
+    }
+  };
+
+  const handleBindingScanned = (rawValue: string) => {
     try {
+      const payload = parsePairingPayload(rawValue);
+      const desktop = boundDesktopFromPairingPayload(payload);
+      const nextDesktops = upsertBoundDesktop(boundDesktops, desktop);
+
+      setBoundDesktops(nextDesktops);
+      setActiveBoundDesktopId(desktop.id);
+      setDesktopDrawerOpen(false);
+      useTaskStore.getState().setScreen("tasks");
+      useTaskStore.getState().setError(undefined);
+      void saveDesktopBindingState({
+        bindings: nextDesktops,
+        lastUsedDesktopId: desktop.id
+      }).catch((error) =>
+        useTaskStore
+          .getState()
+          .setError(error instanceof Error ? error.message : "Failed to save desktop binding")
+      );
+      connectTo(desktop.serverUrl, desktop.deviceId);
+    } catch (error) {
+      useTaskStore
+        .getState()
+        .setError(error instanceof Error ? error.message : "Failed to bind desktop");
+    }
+  };
+
+  const deleteBoundDesktop = (desktopIdToDelete: string) => {
+    Alert.alert("Delete desktop", "This desktop will need to be bound again before reuse.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => void deleteBoundDesktopNow(desktopIdToDelete)
+      }
+    ]);
+  };
+
+  const deleteBoundDesktopNow = async (desktopIdToDelete: string) => {
+    const nextDesktops = boundDesktops.filter((desktop) => desktop.id !== desktopIdToDelete);
+    const nextActiveDesktop =
+      activeBoundDesktopId === desktopIdToDelete ? nextDesktops[0] : activeBoundDesktop;
+
+    setBoundDesktops(nextDesktops);
+    setActiveBoundDesktopId(nextActiveDesktop?.id);
+
+    if (nextActiveDesktop) {
+      setServerUrlInput(nextActiveDesktop.serverUrl);
+      setDeviceIdInput(nextActiveDesktop.deviceId);
+      useTaskStore.getState().setConfig({
+        serverUrl: nextActiveDesktop.serverUrl,
+        deviceId: nextActiveDesktop.deviceId
+      });
+    } else if (activeBoundDesktopId === desktopIdToDelete) {
+      clientRef.current.disconnect();
+      setDeviceIdInput("");
+      useTaskStore.getState().setConfig({
+        serverUrl: serverUrlInput,
+        deviceId: ""
+      });
+      useTaskStore.getState().setConnectionStatus("disconnected");
+    }
+
+    try {
+      await saveDesktopBindingState({
+        bindings: nextDesktops,
+        lastUsedDesktopId: nextActiveDesktop?.id
+      });
+      useTaskStore.getState().setError(undefined);
+    } catch (error) {
+      useTaskStore
+        .getState()
+        .setError(error instanceof Error ? error.message : "Failed to delete desktop binding");
+    }
+  };
+
+  const createTask = (input: { workspacePath: string; prompt: string; targetDesktopId?: string }) => {
+    try {
+      const now = new Date().toISOString();
+      const taskId = createLocalTaskId();
+      const targetDesktopId = input.targetDesktopId ?? activeBoundDesktop?.desktopId;
+      useTaskStore.getState().upsertTask({
+        id: taskId,
+        prompt: input.prompt,
+        status: "created",
+        createdByDeviceId: useTaskStore.getState().deviceId,
+        assignedDesktopDeviceId: targetDesktopId,
+        createdAt: now,
+        updatedAt: now,
+        metadata: {
+          workspacePath: input.workspacePath
+        }
+      });
       clientRef.current.createTask({
         deviceId: useTaskStore.getState().deviceId,
+        targetDesktopId,
+        requestId: taskId,
         workspacePath: input.workspacePath,
         prompt: input.prompt
       });
@@ -257,12 +534,15 @@ export default function App() {
 
   const openTask = (taskId: string) => {
     useTaskStore.getState().selectTask(taskId);
-    void loadTaskDetail(taskId);
+    loadTaskDetail(taskId);
   };
 
   const cancelTask = (taskId: string) => {
     try {
-      clientRef.current.cancelTask(taskId);
+      const targetDesktopId =
+        useTaskStore.getState().tasksById[taskId]?.assignedDesktopDeviceId ??
+        activeBoundDesktop?.desktopId;
+      clientRef.current.cancelTask(taskId, targetDesktopId);
       useTaskStore.getState().setError(undefined);
     } catch (error) {
       useTaskStore
@@ -277,9 +557,13 @@ export default function App() {
     decision: "approved" | "rejected"
   ) => {
     try {
+      const targetDesktopId =
+        useTaskStore.getState().tasksById[taskId]?.assignedDesktopDeviceId ??
+        activeBoundDesktop?.desktopId;
       clientRef.current.submitApproval({
         taskId,
         approvalRequestId,
+        targetDesktopId,
         decision,
         reason: decision === "rejected" ? "Rejected from mobile" : undefined
       });
@@ -292,53 +576,55 @@ export default function App() {
   };
 
   const clearHistory = () => {
-    const normalizedServerUrl = serverUrlInput.trim() || serverUrl;
-    const normalizedDeviceId = deviceIdInput.trim() || deviceId;
-    if (!normalizedServerUrl || !normalizedDeviceId) {
-      Alert.alert("Missing device", "Connect or enter a deviceId before clearing history.");
+    if (visibleTasks.length === 0) {
+      Alert.alert("No local records", "There are no task records to clear.");
       return;
     }
 
     Alert.alert(
-      "Clear history",
-      "This removes terminal tasks matching the current filters. Running tasks are kept.",
+      "Clear local records",
+      "This removes the task records currently shown on this phone.",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Clear",
           style: "destructive",
-          onPress: () => void clearHistoryNow(normalizedServerUrl, normalizedDeviceId)
+          onPress: clearHistoryNow
         }
       ]
     );
   };
 
-  const clearHistoryNow = async (normalizedServerUrl: string, normalizedDeviceId: string) => {
-    useTaskStore.getState().setHistoryLoading(true);
-    try {
-      const api = new ApiClient(normalizedServerUrl);
-      await api.clearHistory({
-        deviceId: normalizedDeviceId,
-        status: historyFilters.status,
-        prompt: historyFilters.prompt,
-        createdFrom: historyFilters.createdFrom,
-        createdTo: historyFilters.createdTo
-      });
-      await loadHistory(normalizedServerUrl, normalizedDeviceId, historyFilters);
-      useTaskStore.getState().setError(undefined);
-    } catch (error) {
-      useTaskStore
-        .getState()
-        .setError(error instanceof Error ? error.message : "Failed to clear history");
-    } finally {
-      useTaskStore.getState().setHistoryLoading(false);
-    }
+  const clearHistoryNow = () => {
+    useTaskStore.getState().clearTasks(visibleTasks.map((task) => task.id));
+    useTaskStore.getState().setError(undefined);
+  };
+
+  const deleteTask = (taskId: string) => {
+    Alert.alert("Delete local task", "This removes the task record from this phone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => useTaskStore.getState().deleteTask(taskId)
+      }
+    ]);
   };
 
   const renderScreen = () => {
+    if (screen === "scanBinding") {
+      return (
+        <ScanBindingScreen
+          onBack={() => useTaskStore.getState().setScreen("tasks")}
+          onScanned={handleBindingScanned}
+        />
+      );
+    }
+
     if (screen === "create") {
       return (
         <CreateTaskScreen
+          availableDesktops={availableDesktops}
           canRun={canRun}
           onBack={() => useTaskStore.getState().setScreen("tasks")}
           onRun={createTask}
@@ -353,10 +639,10 @@ export default function App() {
           onBack={() => useTaskStore.getState().setScreen("tasks")}
           onCancel={cancelTask}
           onSubmitApproval={submitApproval}
-          onRefresh={(taskId) => void loadTaskDetail(taskId)}
+          onRefresh={loadTaskDetail}
           hasMoreOutputs={selectedOutputPage?.hasMore ?? false}
           isLoadingOutputs={selectedOutputPage?.isLoading ?? false}
-          onLoadMoreOutputs={(taskId) => void loadMoreOutputs(taskId)}
+          onLoadMoreOutputs={loadMoreOutputs}
           approvals={selectedApprovals}
           outputs={selectedOutputs}
           task={selectedTask}
@@ -364,17 +650,47 @@ export default function App() {
       );
     }
 
+    if (isLoadingDesktopBindings) {
+      return (
+        <View style={styles.emptyBindingPanel}>
+          <Text style={sharedStyles.label}>Desktops</Text>
+          <Text style={styles.emptyBindingTitle}>Loading desktop bindings</Text>
+          <Text style={sharedStyles.muted}>Checking the last desktop you used.</Text>
+        </View>
+      );
+    }
+
+    if (boundDesktops.length === 0) {
+      return (
+        <View style={styles.emptyBindingPanel}>
+          <Text style={sharedStyles.label}>Desktops</Text>
+          <Text style={styles.emptyBindingTitle}>No desktop bound</Text>
+          <Text style={sharedStyles.muted}>
+            Bind a desktop before creating or viewing Codex tasks.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => useTaskStore.getState().setScreen("scanBinding")}
+            style={sharedStyles.button}
+          >
+            <Text style={sharedStyles.buttonText}>Bind desktop</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
     return (
       <TaskListScreen
         filters={historyFilters}
         isLoading={isLoadingHistory}
-        onApplyFilters={() => void loadHistory(serverUrlInput, deviceIdInput, historyFilters)}
+        onApplyFilters={applyLocalHistoryFilters}
         onClearHistory={clearHistory}
         onCreate={() => useTaskStore.getState().setScreen("create")}
+        onDeleteTask={deleteTask}
         onFiltersChange={setHistoryFilters}
         onOpenTask={openTask}
-        onRefresh={() => void loadHistory()}
-        tasks={tasks}
+        onRefresh={applyLocalHistoryFilters}
+        tasks={visibleTasks}
       />
     );
   };
@@ -385,71 +701,109 @@ export default function App() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.keyboard}
       >
-        <View style={styles.page}>
-          <View style={styles.connectionPanel}>
-            <View style={styles.connectionHeader}>
-              <View>
-                <Text style={sharedStyles.label}>Mobile</Text>
-                <Text style={sharedStyles.title}>Personal AI Assistant</Text>
-              </View>
-              <View style={styles.statusBlock}>
-                <Text style={sharedStyles.label}>Status</Text>
-                <Text style={styles.connectionStatus}>{connectionStatus}</Text>
-              </View>
-            </View>
+        <View style={styles.pageShell} {...panResponder.panHandlers}>
+          <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
+            <View style={styles.page}>
+              <View style={styles.connectionPanel}>
+                <View style={styles.connectionHeader}>
+                  <View>
+                    <Text style={sharedStyles.label}>Mobile</Text>
+                    <Text style={sharedStyles.title}>Personal AI Assistant</Text>
+                  </View>
+                  <View style={styles.statusBlock}>
+                    <Text style={sharedStyles.label}>Status</Text>
+                    <Text style={styles.connectionStatus}>{connectionStatus}</Text>
+                  </View>
+                </View>
 
-            <View style={styles.fieldRow}>
-              <View style={styles.field}>
-                <Text style={sharedStyles.label}>Server URL</Text>
-                <TextInput
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onChangeText={setServerUrlInput}
-                  placeholder="http://localhost:3000"
-                  style={sharedStyles.input}
-                  value={serverUrlInput}
-                />
-              </View>
-              <View style={styles.field}>
-                <Text style={sharedStyles.label}>Device ID</Text>
-                <TextInput
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onChangeText={setDeviceIdInput}
-                  placeholder="my-device"
-                  style={sharedStyles.input}
-                  value={deviceIdInput}
-                />
-              </View>
-            </View>
+                <View style={styles.fieldRow}>
+                  <View style={styles.field}>
+                    <Text style={sharedStyles.label}>Server URL</Text>
+                    <TextInput
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      onChangeText={setServerUrlInput}
+                      placeholder="http://localhost:3000"
+                      style={sharedStyles.input}
+                      value={serverUrlInput}
+                    />
+                  </View>
+                  <View style={styles.field}>
+                    <Text style={sharedStyles.label}>Device ID</Text>
+                    <TextInput
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      onChangeText={setDeviceIdInput}
+                      placeholder="my-device"
+                      style={sharedStyles.input}
+                      value={deviceIdInput}
+                    />
+                  </View>
+                </View>
 
-            <View style={styles.actions}>
-              <Pressable accessibilityRole="button" onPress={connect} style={sharedStyles.button}>
-                <Text style={sharedStyles.buttonText}>
-                  {connectionStatus === "connected" ? "Reconnect" : "Connect"}
+                <View style={styles.actions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setDesktopDrawerOpen(true)}
+                    style={[sharedStyles.button, sharedStyles.buttonGhost]}
+                  >
+                    <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
+                      Desktops
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={connect}
+                    style={sharedStyles.button}
+                  >
+                    <Text style={sharedStyles.buttonText}>
+                      {connectionStatus === "connected" ? "Reconnect" : "Connect"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={disconnect}
+                    style={[sharedStyles.button, sharedStyles.buttonGhost]}
+                  >
+                    <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
+                      Disconnect
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <Text style={styles.deviceText}>Current deviceId: {deviceId || "not set"}</Text>
+                <Text style={styles.deviceText}>
+                  Active desktop: {activeBoundDesktop?.desktopName ?? "not selected"}
                 </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={disconnect}
-                style={[sharedStyles.button, sharedStyles.buttonGhost]}
-              >
-                <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
-                  Disconnect
+                <Text style={styles.deviceText}>
+                  Online desktops:{" "}
+                  {availableDesktops.length > 0
+                    ? availableDesktops.map((desktop) => desktop.label).join(", ")
+                    : "none"}
                 </Text>
-              </Pressable>
+                {selectedTask ? (
+                  <Text style={styles.deviceText}>
+                    Selected task: {toDisplayTaskStatus(selectedTask.status)}
+                  </Text>
+                ) : null}
+                {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+              </View>
+
+              <View style={styles.screen}>{renderScreen()}</View>
             </View>
-
-            <Text style={styles.deviceText}>Current deviceId: {deviceId || "not set"}</Text>
-            {selectedTask ? (
-              <Text style={styles.deviceText}>
-                Selected task: {toDisplayTaskStatus(selectedTask.status)}
-              </Text>
-            ) : null}
-            {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
-          </View>
-
-          <View style={styles.screen}>{renderScreen()}</View>
+          </TouchableWithoutFeedback>
+          <BoundDesktopDrawer
+            activeDesktopId={activeBoundDesktopId}
+            desktops={boundDesktops}
+            isOpen={isDesktopDrawerOpen}
+            onClose={() => setDesktopDrawerOpen(false)}
+            onDelete={deleteBoundDesktop}
+            onScan={() => {
+              setDesktopDrawerOpen(false);
+              useTaskStore.getState().setScreen("scanBinding");
+            }}
+            onSelect={selectBoundDesktop}
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -459,6 +813,7 @@ export default function App() {
 const styles = StyleSheet.create({
   actions: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10
   },
   connectionHeader: {
@@ -483,13 +838,21 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13
   },
+  emptyBindingPanel: {
+    gap: 10,
+    paddingVertical: 24
+  },
+  emptyBindingTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "700"
+  },
   error: {
     color: colors.danger,
     fontSize: 13,
     fontWeight: "700"
   },
   field: {
-    flex: 1,
     gap: 6
   },
   fieldRow: {
@@ -501,7 +864,12 @@ const styles = StyleSheet.create({
   page: {
     backgroundColor: colors.background,
     flex: 1,
-    padding: 16
+    padding: 16,
+    paddingBottom: 28
+  },
+  pageShell: {
+    backgroundColor: colors.background,
+    flex: 1
   },
   safeArea: {
     backgroundColor: colors.background,
@@ -509,7 +877,6 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
-    minHeight: 520,
     paddingTop: 16
   },
   statusBlock: {

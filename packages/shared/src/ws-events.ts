@@ -24,7 +24,8 @@ export const WS_EVENTS = {
   TASK_APPROVAL_RESULT: "task.approval.result",
   TASK_COMPLETED: "task.completed",
   TASK_FAILED: "task.failed",
-  TASK_CANCEL: "task.cancel"
+  TASK_CANCEL: "task.cancel",
+  TASK_RELAY_FAILED: "task.relay_failed"
 } as const;
 
 export const WS_EVENT_NAMES = [
@@ -39,7 +40,8 @@ export const WS_EVENT_NAMES = [
   WS_EVENTS.TASK_APPROVAL_RESULT,
   WS_EVENTS.TASK_COMPLETED,
   WS_EVENTS.TASK_FAILED,
-  WS_EVENTS.TASK_CANCEL
+  WS_EVENTS.TASK_CANCEL,
+  WS_EVENTS.TASK_RELAY_FAILED
 ] as const;
 
 export type WsEventName = (typeof WS_EVENT_NAMES)[number];
@@ -59,6 +61,7 @@ export interface DeviceOnlinePayload {
 
 export interface TaskCreatePayload {
   deviceId: Id;
+  targetDesktopId?: Id;
   prompt: string;
   requestId?: Id;
   metadata?: Record<string, unknown>;
@@ -87,6 +90,7 @@ export interface TaskApprovalSubmitPayload {
   taskId: Id;
   approvalRequestId: Id;
   deviceId: Id;
+  targetDesktopId?: Id;
   decision: ApprovalDecision;
   reason?: string;
 }
@@ -115,7 +119,18 @@ export interface TaskFailedPayload {
 export interface TaskCancelPayload {
   taskId: Id;
   deviceId: Id;
+  targetDesktopId?: Id;
   reason?: string;
+}
+
+export interface TaskRelayFailedPayload {
+  taskId?: Id;
+  deviceId: Id;
+  targetDesktopId?: Id;
+  failedEventName: string;
+  attempts: number;
+  error: SharedError;
+  createdAt: string;
 }
 
 export interface ClientToServerEventPayloads {
@@ -141,6 +156,7 @@ export interface ServerToClientEventPayloads {
   [WS_EVENTS.TASK_COMPLETED]: TaskCompletedPayload;
   [WS_EVENTS.TASK_FAILED]: TaskFailedPayload;
   [WS_EVENTS.TASK_CANCEL]: TaskCancelPayload;
+  [WS_EVENTS.TASK_RELAY_FAILED]: TaskRelayFailedPayload;
 }
 
 export type WsEventPayloads = ClientToServerEventPayloads & ServerToClientEventPayloads;

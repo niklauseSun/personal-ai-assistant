@@ -4,6 +4,8 @@ import { WS_EVENTS } from "@personal-ai-assistant/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { TaskService } from "./task.service";
 
+process.env.SERVER_STORAGE_MODE = "persist";
+
 describe("TaskService", () => {
   const prisma = new PrismaService();
   const service = new TaskService(prisma);
@@ -28,6 +30,7 @@ describe("TaskService", () => {
     const created = await service.createTask(
       {
         deviceId: "binding-1",
+        targetDesktopId: "desktop-1",
         prompt: "Implement server"
       },
       "socket-mobile"
@@ -35,7 +38,8 @@ describe("TaskService", () => {
 
     assert.equal(created.task.status, "created");
     assert.equal(created.task.createdByDeviceId, "binding-1");
-    assert.equal(created.task.assignedDesktopDeviceId, "binding-1");
+    assert.equal(created.task.assignedDesktopDeviceId, "desktop-1");
+    assert.equal(await service.getTaskTargetDesktopId(created.task.id), "desktop-1");
 
     const tasks = await service.listTasks("binding-1");
     assert.equal(tasks.length, 1);
@@ -51,6 +55,7 @@ describe("TaskService", () => {
   it("creates transient relay-only task payloads without storing history", async () => {
     const created = service.createTransientTask({
       deviceId: "binding-relay",
+      targetDesktopId: "desktop-relay",
       prompt: "Run without server history",
       requestId: "task-relay",
       metadata: {
@@ -61,12 +66,15 @@ describe("TaskService", () => {
       taskId: "task-relay",
       approvalRequestId: "approval-relay",
       deviceId: "binding-relay",
+      targetDesktopId: "desktop-relay",
       decision: "approved"
     });
 
     assert.equal(created.task.id, "task-relay");
     assert.equal(created.task.status, "created");
+    assert.equal(created.task.assignedDesktopDeviceId, "desktop-relay");
     assert.equal(created.task.metadata?.workspacePath, "/tmp/project");
+    assert.equal(approval.submitPayload.targetDesktopId, "desktop-relay");
     assert.equal(approval.resultPayload.status, "approved");
     assert.equal(await prisma.agentTask.count(), 0);
     assert.equal(await prisma.taskEvent.count(), 0);

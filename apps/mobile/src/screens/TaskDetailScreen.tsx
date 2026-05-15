@@ -4,7 +4,7 @@ import type {
   ApprovalRequest,
   OutputChunk
 } from "@personal-ai-assistant/shared";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, sharedStyles } from "../ui/styles";
 import { statusColor, toDisplayTaskStatus } from "../utils/status";
 
@@ -136,44 +136,40 @@ export function TaskDetailScreen({
         </View>
       ) : null}
 
-      <FlatList
-        contentContainerStyle={outputs.length === 0 ? styles.emptyOutput : styles.outputList}
-        data={outputs}
-        keyExtractor={(item) => item.id}
-        ListEmptyComponent={
+      <View style={outputs.length === 0 ? styles.emptyOutput : styles.outputList}>
+        {outputs.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No output yet</Text>
             <Text style={sharedStyles.muted}>Output will appear as Codex writes stdout/stderr.</Text>
           </View>
-        }
-        ListFooterComponent={
-          hasMoreOutputs ? (
-            <Pressable
-              accessibilityRole="button"
-              disabled={isLoadingOutputs}
-              onPress={() => onLoadMoreOutputs(task.id)}
-              style={[
-                sharedStyles.button,
-                sharedStyles.buttonGhost,
-                styles.loadMoreButton,
-                isLoadingOutputs && styles.disabled
-              ]}
-            >
-              <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
-                {isLoadingOutputs ? "Loading..." : "Load more output"}
+        ) : (
+          outputs.map((item) => (
+            <View key={item.id} style={styles.outputRow}>
+              <Text style={styles.stream}>{item.stream}</Text>
+              <Text selectable style={styles.outputText}>
+                {item.content}
               </Text>
-            </Pressable>
-          ) : null
-        }
-        renderItem={({ item }) => (
-          <View style={styles.outputRow}>
-            <Text style={styles.stream}>{item.stream}</Text>
-            <Text selectable style={styles.outputText}>
-              {item.content}
-            </Text>
-          </View>
+            </View>
+          ))
         )}
-      />
+        {hasMoreOutputs ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={isLoadingOutputs}
+            onPress={() => onLoadMoreOutputs(task.id)}
+            style={[
+              sharedStyles.button,
+              sharedStyles.buttonGhost,
+              styles.loadMoreButton,
+              isLoadingOutputs && styles.disabled
+            ]}
+          >
+            <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
+              {isLoadingOutputs ? "Loading..." : "Load more output"}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -204,14 +200,13 @@ const styles = StyleSheet.create({
     fontWeight: "700"
   },
   container: {
-    flex: 1,
     gap: 12
   },
   disabled: {
     backgroundColor: "#9aa8b2"
   },
   emptyOutput: {
-    flexGrow: 1,
+    minHeight: 220,
     justifyContent: "center"
   },
   emptyState: {

@@ -11,6 +11,7 @@ import type {
   TaskCreatedPayload,
   TaskFailedPayload,
   TaskOutputPayload,
+  TaskRelayFailedPayload,
   TaskStartedPayload,
   TaskWaitingApprovalPayload
 } from "@personal-ai-assistant/shared";
@@ -27,6 +28,7 @@ export interface MobileWebSocketHandlers {
   onOutput: (chunk: OutputChunk) => void;
   onApproval: (approval: ApprovalRequest) => void;
   onApprovalResult: (result: TaskApprovalResultPayload) => void;
+  onRelayFailed: (failure: TaskRelayFailedPayload) => void;
 }
 
 export interface MobileConnectOptions {
@@ -37,6 +39,8 @@ export interface MobileConnectOptions {
 
 export interface CreateTaskInput {
   deviceId: string;
+  targetDesktopId?: string;
+  requestId?: string;
   workspacePath: string;
   prompt: string;
 }
@@ -44,6 +48,7 @@ export interface CreateTaskInput {
 export interface SubmitApprovalInput {
   taskId: string;
   approvalRequestId: string;
+  targetDesktopId?: string;
   decision: ApprovalDecision;
   reason?: string;
 }
@@ -80,6 +85,8 @@ export class MobileWebSocketClient {
   createTask(input: CreateTaskInput) {
     this.requireSocket().emit(WS_EVENTS.TASK_CREATE, {
       deviceId: input.deviceId,
+      targetDesktopId: input.targetDesktopId,
+      requestId: input.requestId,
       prompt: input.prompt,
       metadata: {
         workspacePath: input.workspacePath
@@ -87,7 +94,7 @@ export class MobileWebSocketClient {
     });
   }
 
-  cancelTask(taskId: string) {
+  cancelTask(taskId: string, targetDesktopId?: string) {
     const deviceId = this.deviceId;
     if (!deviceId) {
       throw new Error("Connect before cancelling a task");
@@ -96,6 +103,7 @@ export class MobileWebSocketClient {
     this.requireSocket().emit(WS_EVENTS.TASK_CANCEL, {
       taskId,
       deviceId,
+      targetDesktopId,
       reason: "Cancelled from mobile"
     });
   }
@@ -110,6 +118,7 @@ export class MobileWebSocketClient {
       taskId: input.taskId,
       approvalRequestId: input.approvalRequestId,
       deviceId,
+      targetDesktopId: input.targetDesktopId,
       decision: input.decision,
       reason: input.reason
     });
@@ -177,6 +186,10 @@ export class MobileWebSocketClient {
 
     socket.on(WS_EVENTS.TASK_FAILED, (payload: TaskFailedPayload) => {
       this.handlers?.onTask(payload.task);
+    });
+
+    socket.on(WS_EVENTS.TASK_RELAY_FAILED, (payload: TaskRelayFailedPayload) => {
+      this.handlers?.onRelayFailed(payload);
     });
 
     socket.on(WS_EVENTS.TASK_CANCEL, (payload: TaskCancelPayload) => {

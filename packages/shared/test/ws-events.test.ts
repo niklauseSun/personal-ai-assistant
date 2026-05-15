@@ -1,6 +1,8 @@
 import {
   WS_EVENTS,
+  createDesktopPairingPayload,
   createWsMessage,
+  isDesktopPairingPayload,
   isWsEventName,
   type AgentTask,
   type ApprovalRequest,
@@ -35,7 +37,8 @@ type RequiredEventNames =
   | "task.approval.result"
   | "task.completed"
   | "task.failed"
-  | "task.cancel";
+  | "task.cancel"
+  | "task.relay_failed";
 
 type RequiredEventsArePresent = Expect<Equal<WsEventName, RequiredEventNames>>;
 
@@ -44,6 +47,7 @@ const task: AgentTask = {
   prompt: "Implement the shared protocol",
   status: "created",
   createdByDeviceId: "mobile-1",
+  assignedDesktopDeviceId: "desktop-1",
   createdAt,
   updatedAt: createdAt
 };
@@ -58,12 +62,15 @@ const chunk: OutputChunk = {
 };
 
 const session: DeviceSession = {
-  deviceId: "desktop-1",
+  deviceId: "mobile-1",
   clientType: "desktop",
   status: "online",
   deviceName: "MacBook",
   registeredAt: createdAt,
-  lastSeenAt: createdAt
+  lastSeenAt: createdAt,
+  metadata: {
+    desktopId: "desktop-1"
+  }
 };
 
 const approval: ApprovalRequest = {
@@ -90,6 +97,7 @@ const onlinePayload: ServerToClientEventPayloads[typeof WS_EVENTS.DEVICE_ONLINE]
 
 const createPayload: ClientToServerEventPayloads[typeof WS_EVENTS.TASK_CREATE] = {
   deviceId: "mobile-1",
+  targetDesktopId: "desktop-1",
   prompt: "Implement packages/shared"
 };
 
@@ -126,6 +134,7 @@ const approvalPayload: ClientToServerEventPayloads[typeof WS_EVENTS.TASK_APPROVA
   taskId: "task-1",
   approvalRequestId: "approval-1",
   deviceId: "mobile-1",
+  targetDesktopId: "desktop-1",
   decision: "approved"
 };
 
@@ -163,7 +172,21 @@ const failedPayload: ServerToClientEventPayloads[typeof WS_EVENTS.TASK_FAILED] =
 const cancelPayload: ClientToServerEventPayloads[typeof WS_EVENTS.TASK_CANCEL] = {
   taskId: "task-1",
   deviceId: "mobile-1",
+  targetDesktopId: "desktop-1",
   reason: "User cancelled"
+};
+
+const relayFailedPayload: ServerToClientEventPayloads[typeof WS_EVENTS.TASK_RELAY_FAILED] = {
+  taskId: "task-1",
+  deviceId: "mobile-1",
+  targetDesktopId: "desktop-1",
+  failedEventName: "task.created",
+  attempts: 5,
+  error: {
+    code: "RELAY_TARGET_OFFLINE",
+    message: "Desktop is not connected"
+  },
+  createdAt
 };
 
 const message: WsMessage<typeof WS_EVENTS.TASK_OUTPUT> = createWsMessage(
@@ -172,6 +195,17 @@ const message: WsMessage<typeof WS_EVENTS.TASK_OUTPUT> = createWsMessage(
 );
 
 const knownEvent: boolean = isWsEventName(WS_EVENTS.TASK_CREATED);
+const pairingPayload = createDesktopPairingPayload({
+  serverUrl: "http://localhost:3000",
+  deviceToken: "device-token-1",
+  desktopId: "desktop-1",
+  desktopName: "MacBook"
+});
+const validPairingPayload: boolean = isDesktopPairingPayload(pairingPayload);
+const invalidPairingPayload: boolean = isDesktopPairingPayload({
+  ...pairingPayload,
+  version: 2
+});
 
 const requiredEventsArePresent: RequiredEventsArePresent = true;
 
@@ -188,8 +222,11 @@ void approvalResultPayload;
 void completedPayload;
 void failedPayload;
 void cancelPayload;
+void relayFailedPayload;
 void message;
 void knownEvent;
+void validPairingPayload;
+void invalidPairingPayload;
 
 // @ts-expect-error task.create requires a prompt.
 const invalidCreatePayload: ClientToServerEventPayloads[typeof WS_EVENTS.TASK_CREATE] = {

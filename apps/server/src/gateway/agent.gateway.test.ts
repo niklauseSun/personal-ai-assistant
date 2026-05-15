@@ -7,6 +7,8 @@ import { PrismaService } from "../prisma/prisma.service";
 import { TaskService } from "../tasks/task.service";
 import { AgentGateway } from "./agent.gateway";
 
+process.env.SERVER_STORAGE_MODE = "relay_only";
+
 class FakeSocket {
   readonly joins: string[] = [];
   readonly emissions: Array<{ eventName: string; payload: unknown }> = [];
@@ -46,6 +48,8 @@ describe("AgentGateway relay-only mode", () => {
   });
 
   beforeEach(async () => {
+    process.env.RELAY_RETRY_ATTEMPTS = "5";
+    process.env.RELAY_RETRY_DELAY_MS = "0";
     await prisma.taskEvent.deleteMany();
     await prisma.approvalResult.deleteMany();
     await prisma.approvalRequest.deleteMany();
@@ -72,6 +76,7 @@ describe("AgentGateway relay-only mode", () => {
         deviceName: "Workstation",
         clientType: "desktop",
         metadata: {
+          desktopId: "desktop-relay",
           serverPersistence: "relay_only"
         }
       },
@@ -88,6 +93,7 @@ describe("AgentGateway relay-only mode", () => {
     const created = await gateway.handleTaskCreate(
       {
         deviceId: "binding-relay",
+        targetDesktopId: "desktop-relay",
         requestId: "task-relay",
         prompt: "Run Codex without server history",
         metadata: {
@@ -98,11 +104,18 @@ describe("AgentGateway relay-only mode", () => {
     );
 
     assert.equal(created.task.id, "task-relay");
+    assert.equal(created.task.assignedDesktopDeviceId, "desktop-relay");
     assert.equal(await prisma.agentTask.count(), 0);
+    assert.ok(
+      desktop.joins.includes(
+        DeviceConnectionService.desktopTargetRoomName("binding-relay", "desktop-relay")
+      )
+    );
     assert.ok(
       server.emissions.some(
         (emission) =>
-          emission.room === DeviceConnectionService.roomName("binding-relay", "desktop") &&
+          emission.room ===
+            DeviceConnectionService.desktopTargetRoomName("binding-relay", "desktop-relay") &&
           emission.eventName === WS_EVENTS.TASK_CREATED
       )
     );
@@ -127,6 +140,7 @@ describe("AgentGateway relay-only mode", () => {
         taskId: "task-relay",
         approvalRequestId: "approval-relay",
         deviceId: "binding-relay",
+        targetDesktopId: "desktop-relay",
         decision: "approved"
       },
       mobile as unknown as Socket
@@ -145,7 +159,8 @@ describe("AgentGateway relay-only mode", () => {
     assert.ok(
       server.emissions.some(
         (emission) =>
-          emission.room === DeviceConnectionService.roomName("binding-relay", "desktop") &&
+          emission.room ===
+            DeviceConnectionService.desktopTargetRoomName("binding-relay", "desktop-relay") &&
           emission.eventName === WS_EVENTS.TASK_APPROVAL_SUBMIT
       )
     );
@@ -156,5 +171,44 @@ describe("AgentGateway relay-only mode", () => {
           emission.eventName === WS_EVENTS.TASK_APPROVAL_RESULT
       )
     );
+  });
+
+  it("reports relay failures to mobile after retrying five times", async () => {
+    const mobile = new FakeSocket("mobile-offline-target");
+
+    await gateway.handleDeviceRegister(
+      {
+        deviceId: "binding-offline",
+        clientType: "mobile"
+      },
+      mobile as unknown as Socket
+    );
+
+    await gateway.handleTaskCreate(
+      {
+        deviceId: "binding-offline",
+        targetDesktopId: "desktop-missing",
+        requestId: "task-offline",
+        prompt: "Run on a missing desktop",
+        metadata: {
+          workspacePath: "/tmp/project"
+        }
+      },
+      mobile as unknown as Socket
+    );
+
+    const relayFailure = server.emissions.find(
+      (emission) =>
+        emission.room === DeviceConnectionService.roomName("binding-offline", "mobile") &&
+        emission.eventName === WS_EVENTS.TASK_RELAY_FAILED
+    );
+
+    assert.ok(relayFailure);
+    assert.equal((relayFailure.payload as { attempts: number }).attempts, 5);
+    assert.equal(
+      (relayFailure.payload as { error: { code: string } }).error.code,
+      "RELAY_TARGET_OFFLINE"
+    );
+    assert.equal(await prisma.agentTask.count(), 0);
   });
 });

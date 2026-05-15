@@ -1,10 +1,12 @@
 import type { DesktopAppConfig, DesktopMobileBinding } from "@personal-ai-assistant/shared";
+import { createDesktopPairingPayload } from "@personal-ai-assistant/shared";
+import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 
 const emptyConfig: DesktopAppConfig = {
   serverUrl: "http://localhost:3000",
   desktopName: "Desktop",
-  serverPersistence: "persist",
+  serverPersistence: "relay_only",
   bindings: []
 };
 
@@ -13,10 +15,52 @@ export function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string>();
+  const [qrBindingId, setQrBindingId] = useState<string>();
+  const [qrDataUrl, setQrDataUrl] = useState<string>();
+  const [qrError, setQrError] = useState<string>();
   const enabledCount = useMemo(
     () => config.bindings.filter((binding) => binding.enabled).length,
     [config.bindings]
   );
+  const qrBinding = useMemo(
+    () => config.bindings.find((binding) => binding.id === qrBindingId),
+    [config.bindings, qrBindingId]
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!qrBinding) {
+      setQrDataUrl(undefined);
+      setQrError(undefined);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    const payload = createPairingPayload(config, qrBinding);
+    QRCode.toDataURL(JSON.stringify(payload), {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 260
+    })
+      .then((dataUrl) => {
+        if (isMounted) {
+          setQrDataUrl(dataUrl);
+          setQrError(undefined);
+        }
+      })
+      .catch((error) => {
+        if (isMounted) {
+          setQrDataUrl(undefined);
+          setQrError(error instanceof Error ? error.message : "Failed to generate QR code");
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [config, qrBinding]);
 
   useEffect(() => {
     let isMounted = true;
@@ -92,19 +136,56 @@ export function App() {
     }));
   };
 
+  const createPairingBinding = async () => {
+    const now = new Date().toISOString();
+    const binding: DesktopMobileBinding = {
+      id: createBindingId(),
+      deviceId: createDeviceToken(),
+      displayName: "Mobile",
+      enabled: true,
+      createdAt: now,
+      updatedAt: now
+    };
+    const nextConfig = {
+      ...config,
+      serverPersistence: "relay_only" as const,
+      bindings: [...config.bindings, binding]
+    };
+
+    setConfig(nextConfig);
+    setQrBindingId(binding.id);
+    await persistConfig(nextConfig, "Binding token created. Scan the QR code from mobile.");
+  };
+
   const removeBinding = (bindingId: string) => {
     setConfig((current) => ({
       ...current,
       bindings: current.bindings.filter((binding) => binding.id !== bindingId)
     }));
+    if (qrBindingId === bindingId) {
+      setQrBindingId(undefined);
+    }
   };
 
   const saveConfig = async () => {
+    await persistConfig(
+      {
+        ...config,
+        serverPersistence: "relay_only"
+      },
+      "Saved. Desktop WebSocket bindings were reloaded."
+    );
+  };
+
+  const persistConfig = async (nextConfig: DesktopAppConfig, successMessage: string) => {
     setIsSaving(true);
     try {
-      const savedConfig = await window.desktopShell.saveConfig(config);
+      const savedConfig = await window.desktopShell.saveConfig({
+        ...nextConfig,
+        serverPersistence: "relay_only"
+      });
       setConfig(savedConfig);
-      setMessage("Saved. Desktop WebSocket bindings were reloaded.");
+      setMessage(successMessage);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to save desktop config");
     } finally {
@@ -170,36 +251,6 @@ export function App() {
               value={config.defaultWorkspacePath ?? ""}
             />
           </label>
-          <fieldset className="field field-wide">
-            <legend>Server history</legend>
-            <div className="segmented-control">
-              <label className={config.serverPersistence === "persist" ? "segment active" : "segment"}>
-                <input
-                  checked={config.serverPersistence === "persist"}
-                  disabled={isLoading}
-                  name="serverPersistence"
-                  onChange={() => updateConfig("serverPersistence", "persist")}
-                  type="radio"
-                />
-                <span>Save history on server</span>
-              </label>
-              <label
-                className={config.serverPersistence === "relay_only" ? "segment active" : "segment"}
-              >
-                <input
-                  checked={config.serverPersistence === "relay_only"}
-                  disabled={isLoading}
-                  name="serverPersistence"
-                  onChange={() => updateConfig("serverPersistence", "relay_only")}
-                  type="radio"
-                />
-                <span>Relay only</span>
-              </label>
-            </div>
-            <p className="help-text">
-              Relay only keeps task, output, and approval history out of the server database.
-            </p>
-          </fieldset>
         </div>
       </section>
 
@@ -207,11 +258,22 @@ export function App() {
         <div className="section-heading">
           <div>
             <h2 id="bindings-title">Mobile bindings</h2>
-            <p className="muted">The mobile app must use the same deviceId as a row below.</p>
+          <p className="muted">
+            Create a token for each phone, then scan its QR code in the mobile app.
+          </p>
           </div>
-          <button className="button secondary" disabled={isLoading} onClick={addBinding}>
-            Add mobile
-          </button>
+          <div className="button-row">
+            <button
+              className="button primary"
+              disabled={isLoading || isSaving}
+              onClick={() => void createPairingBinding()}
+            >
+              Bind mobile
+            </button>
+            <button className="button secondary" disabled={isLoading} onClick={addBinding}>
+              Add manually
+            </button>
+          </div>
         </div>
 
         <div className="binding-list">
@@ -235,7 +297,7 @@ export function App() {
                   <span>Enabled</span>
                 </label>
                 <label className="field compact">
-                  <span>Mobile deviceId</span>
+                  <span>Device token</span>
                   <input
                     autoCapitalize="none"
                     autoCorrect="off"
@@ -243,7 +305,7 @@ export function App() {
                     onChange={(event) =>
                       updateBinding(binding.id, "deviceId", event.target.value)
                     }
-                    placeholder="my-phone"
+                    placeholder="device-token"
                     value={binding.deviceId}
                   />
                 </label>
@@ -258,6 +320,13 @@ export function App() {
                     value={binding.displayName ?? ""}
                   />
                 </label>
+                <button
+                  className="button secondary"
+                  disabled={isLoading || !binding.deviceId.trim()}
+                  onClick={() => setQrBindingId(binding.id)}
+                >
+                  QR
+                </button>
                 <button
                   className="button danger"
                   disabled={isLoading}
@@ -279,6 +348,54 @@ export function App() {
           {isSaving ? "Saving..." : "Save and reload bindings"}
         </button>
       </footer>
+
+      {qrBinding ? (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            aria-labelledby="pairing-title"
+            aria-modal="true"
+            className="pairing-dialog"
+            role="dialog"
+          >
+            <div className="section-heading">
+              <div>
+                <h2 id="pairing-title">Bind mobile</h2>
+                <p className="muted">{qrBinding.displayName || "Mobile"} · {config.desktopName}</p>
+              </div>
+              <button className="button secondary" onClick={() => setQrBindingId(undefined)}>
+                Close
+              </button>
+            </div>
+            <div className="pairing-body">
+              <div className="qr-frame">
+                {qrDataUrl ? (
+                  <img alt="Mobile binding QR code" src={qrDataUrl} />
+                ) : (
+                  <div className="qr-placeholder">{qrError || "Generating QR..."}</div>
+                )}
+              </div>
+              <div className="pairing-detail">
+                <label className="field">
+                  <span>Server URL</span>
+                  <input readOnly value={config.serverUrl} />
+                </label>
+                <label className="field">
+                  <span>Desktop ID</span>
+                  <input readOnly value={qrBinding.id} />
+                </label>
+                <label className="field">
+                  <span>Device token</span>
+                  <input readOnly value={qrBinding.deviceId} />
+                </label>
+                <label className="field">
+                  <span>Manual payload</span>
+                  <textarea readOnly value={JSON.stringify(createPairingPayload(config, qrBinding))} />
+                </label>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -289,4 +406,18 @@ function createBindingId() {
   }
 
   return `binding-${Date.now()}`;
+}
+
+function createDeviceToken() {
+  return `device-token-${createBindingId()}`;
+}
+
+function createPairingPayload(config: DesktopAppConfig, binding: DesktopMobileBinding) {
+  return createDesktopPairingPayload({
+    serverUrl: config.serverUrl,
+    deviceToken: binding.deviceId,
+    desktopId: binding.id,
+    desktopName: config.desktopName,
+    createdAt: binding.createdAt
+  });
 }

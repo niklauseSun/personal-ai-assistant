@@ -18,6 +18,7 @@ import { Logger } from "./logger";
 export interface DesktopWebSocketClientOptions {
   serverUrl: string;
   deviceId: string;
+  desktopId?: string;
   deviceName?: string;
   clientVersion?: string;
   serverPersistence?: ServerPersistenceMode;
@@ -110,7 +111,8 @@ export class DesktopWebSocketClient {
         deviceName: this.options.deviceName,
         clientVersion: this.options.clientVersion,
         metadata: {
-          serverPersistence: this.options.serverPersistence ?? "persist"
+          desktopId: this.options.desktopId,
+          serverPersistence: this.options.serverPersistence ?? "relay_only"
         }
       });
     });

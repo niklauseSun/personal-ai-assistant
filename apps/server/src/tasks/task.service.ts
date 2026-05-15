@@ -90,7 +90,7 @@ export class TaskService {
         deviceId: payload.deviceId,
         prompt: payload.prompt,
         status: "created",
-        assignedDesktopDeviceId: payload.deviceId,
+        assignedDesktopDeviceId: payload.targetDesktopId,
         createdByConnectionId: connectionId,
         metadataJson: stringifyMetadata(payload.metadata)
       }
@@ -114,7 +114,7 @@ export class TaskService {
         prompt: payload.prompt,
         status: "created",
         createdByDeviceId: payload.deviceId,
-        assignedDesktopDeviceId: payload.deviceId,
+        assignedDesktopDeviceId: payload.targetDesktopId,
         createdAt: now,
         updatedAt: now,
         metadata: payload.metadata
@@ -298,6 +298,10 @@ export class TaskService {
     const nextStatus = payload.decision;
     const resolvedAt = new Date();
 
+    if (payload.deviceId !== task.deviceId) {
+      throw new BadRequestException("task approval deviceId does not match task owner");
+    }
+
     const approval = await this.prisma.approvalRequest.findUnique({
       where: {
         id: payload.approvalRequestId
@@ -417,6 +421,11 @@ export class TaskService {
     rawPayload: unknown
   ): Promise<ForwardedPayload<ServerToClientEventPayloads[typeof WS_EVENTS.TASK_CANCEL]>> {
     const payload = this.parseTaskCancelPayload(rawPayload);
+    const existingTask = await this.getTaskRecord(payload.taskId);
+    if (payload.deviceId !== existingTask.deviceId) {
+      throw new BadRequestException("task.cancel deviceId does not match task owner");
+    }
+
     const task = await this.prisma.agentTask.update({
       where: {
         id: payload.taskId
@@ -580,6 +589,11 @@ export class TaskService {
     };
   }
 
+  async getTaskTargetDesktopId(taskId: string): Promise<string | undefined> {
+    const task = await this.getTaskRecord(taskId);
+    return task.assignedDesktopDeviceId ?? undefined;
+  }
+
   private buildTaskWhere(params: TaskSearchParams): Prisma.AgentTaskWhereInput {
     const createdAt: Prisma.DateTimeFilter = {};
     if (params.createdFrom) {
@@ -740,6 +754,7 @@ export class TaskService {
     assertObject(rawPayload, "task.create payload");
     return {
       deviceId: requireString(rawPayload.deviceId, "deviceId"),
+      targetDesktopId: optionalString(rawPayload.targetDesktopId, "targetDesktopId"),
       prompt: requireString(rawPayload.prompt, "prompt"),
       requestId: optionalString(rawPayload.requestId, "requestId"),
       metadata: optionalRecord(rawPayload.metadata, "metadata")
@@ -824,6 +839,7 @@ export class TaskService {
       taskId: requireString(rawPayload.taskId, "taskId"),
       approvalRequestId: requireString(rawPayload.approvalRequestId, "approvalRequestId"),
       deviceId: requireString(rawPayload.deviceId, "deviceId"),
+      targetDesktopId: optionalString(rawPayload.targetDesktopId, "targetDesktopId"),
       decision,
       reason: optionalString(rawPayload.reason, "reason")
     };
@@ -860,6 +876,7 @@ export class TaskService {
     return {
       taskId: requireString(rawPayload.taskId, "taskId"),
       deviceId: requireString(rawPayload.deviceId, "deviceId"),
+      targetDesktopId: optionalString(rawPayload.targetDesktopId, "targetDesktopId"),
       reason: optionalString(rawPayload.reason, "reason")
     };
   }
@@ -873,6 +890,10 @@ export class TaskService {
       prompt: optionalString(value.prompt, "task.prompt") ?? "",
       status: this.parseAgentTaskStatus(value.status),
       createdByDeviceId: optionalString(value.createdByDeviceId, "task.createdByDeviceId") ?? "",
+      assignedDesktopDeviceId: optionalString(
+        value.assignedDesktopDeviceId,
+        "task.assignedDesktopDeviceId"
+      ),
       createdAt: optionalString(value.createdAt, "task.createdAt") ?? now,
       updatedAt: optionalString(value.updatedAt, "task.updatedAt") ?? now,
       startedAt: optionalString(value.startedAt, "task.startedAt"),

@@ -6,6 +6,8 @@ const DEFAULT_DATABASE_URL =
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  private readonly storageEnabled = process.env.SERVER_STORAGE_MODE === "persist";
+
   constructor() {
     const databaseUrl = process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL;
 
@@ -19,10 +21,22 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   }
 
   async onModuleInit() {
+    if (!this.storageEnabled) {
+      return;
+    }
+
     await this.$connect();
   }
 
   async onModuleDestroy() {
+    if (!this.storageEnabled) {
+      return;
+    }
+
     await this.$disconnect();
+  }
+
+  isStorageEnabled() {
+    return this.storageEnabled;
   }
 }

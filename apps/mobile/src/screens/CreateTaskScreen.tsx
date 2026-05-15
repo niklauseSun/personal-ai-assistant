@@ -1,16 +1,42 @@
-import { useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { sharedStyles } from "../ui/styles";
+import { useEffect, useState } from "react";
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { colors, sharedStyles } from "../ui/styles";
 
-interface CreateTaskScreenProps {
-  canRun: boolean;
-  onBack: () => void;
-  onRun: (input: { workspacePath: string; prompt: string }) => void;
+export interface DesktopTargetOption {
+  desktopId: string;
+  label: string;
 }
 
-export function CreateTaskScreen({ canRun, onBack, onRun }: CreateTaskScreenProps) {
+interface CreateTaskScreenProps {
+  availableDesktops: DesktopTargetOption[];
+  canRun: boolean;
+  onBack: () => void;
+  onRun: (input: { workspacePath: string; prompt: string; targetDesktopId?: string }) => void;
+}
+
+export function CreateTaskScreen({
+  availableDesktops,
+  canRun,
+  onBack,
+  onRun
+}: CreateTaskScreenProps) {
   const [workspacePath, setWorkspacePath] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [selectedDesktopId, setSelectedDesktopId] = useState<string | undefined>();
+
+  useEffect(() => {
+    if (availableDesktops.length === 1) {
+      setSelectedDesktopId(availableDesktops[0].desktopId);
+      return;
+    }
+
+    if (
+      selectedDesktopId &&
+      !availableDesktops.some((desktop) => desktop.desktopId === selectedDesktopId)
+    ) {
+      setSelectedDesktopId(undefined);
+    }
+  }, [availableDesktops, selectedDesktopId]);
 
   const run = () => {
     if (!workspacePath.trim()) {
@@ -23,15 +49,21 @@ export function CreateTaskScreen({ canRun, onBack, onRun }: CreateTaskScreenProp
       return;
     }
 
+    if (availableDesktops.length > 0 && !selectedDesktopId) {
+      Alert.alert("Choose a desktop", "Select which desktop should run Codex.");
+      return;
+    }
+
     onRun({
       workspacePath: workspacePath.trim(),
-      prompt: prompt.trim()
+      prompt: prompt.trim(),
+      targetDesktopId: selectedDesktopId
     });
     setPrompt("");
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <View style={styles.container}>
       <View style={styles.headerRow}>
         <View>
           <Text style={sharedStyles.label}>Create</Text>
@@ -44,6 +76,40 @@ export function CreateTaskScreen({ canRun, onBack, onRun }: CreateTaskScreenProp
         >
           <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>Back</Text>
         </Pressable>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={sharedStyles.label}>Desktop</Text>
+        {availableDesktops.length === 0 ? (
+          <Text style={sharedStyles.muted}>
+            No desktop is online yet. You can still run with legacy broadcast routing.
+          </Text>
+        ) : (
+          <View style={styles.desktopList}>
+            {availableDesktops.map((desktop) => {
+              const isSelected = desktop.desktopId === selectedDesktopId;
+
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  key={desktop.desktopId}
+                  onPress={() => setSelectedDesktopId(desktop.desktopId)}
+                  style={[styles.desktopOption, isSelected && styles.desktopOptionSelected]}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.desktopOptionText,
+                      isSelected && styles.desktopOptionTextSelected
+                    ]}
+                  >
+                    {desktop.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
       </View>
 
       <View style={styles.field}>
@@ -78,7 +144,7 @@ export function CreateTaskScreen({ canRun, onBack, onRun }: CreateTaskScreenProp
       >
         <Text style={sharedStyles.buttonText}>{canRun ? "Run" : "Connect first"}</Text>
       </Pressable>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -89,6 +155,32 @@ const styles = StyleSheet.create({
   },
   disabled: {
     backgroundColor: "#9aa8b2"
+  },
+  desktopList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8
+  },
+  desktopOption: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    maxWidth: "100%",
+    paddingHorizontal: 12,
+    paddingVertical: 9
+  },
+  desktopOptionSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary
+  },
+  desktopOptionText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  desktopOptionTextSelected: {
+    color: "#ffffff"
   },
   field: {
     gap: 8

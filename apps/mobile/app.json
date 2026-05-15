@@ -5,6 +5,29 @@
     "scheme": "personal-ai-assistant",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "automatic"
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.personalai.assistant",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Personal AI Assistant to scan desktop binding QR codes."
+      }
+    },
+    "android": {
+      "package": "com.personalai.assistant",
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Personal AI Assistant to scan desktop binding QR codes."
+        }
+      ],
+      "expo-sqlite"
+    ]
   }
 }
