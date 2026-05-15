@@ -234,14 +234,11 @@ export default function App() {
   const availableDesktops = useMemo(
     () => {
       const byId = new Map<string, { desktopId: string; label: string }>();
-      if (activeBoundDesktop) {
-        byId.set(activeBoundDesktop.desktopId, {
-          desktopId: activeBoundDesktop.desktopId,
-          label: activeBoundDesktop.desktopName
-        });
-      }
-
       for (const session of desktopSessions) {
+        if (session.status !== "online") {
+          continue;
+        }
+
         const desktopId = getDesktopId(session);
         if (!desktopId) {
           continue;
@@ -255,8 +252,24 @@ export default function App() {
 
       return Array.from(byId.values());
     },
-    [activeBoundDesktop, desktopSessions]
+    [desktopSessions]
   );
+  const desktopPresenceById = useMemo(() => {
+    const presenceById: Record<string, { status: "online" | "offline"; lastSeenAt: string }> = {};
+    for (const session of desktopSessions) {
+      const desktopId = getDesktopId(session);
+      if (!desktopId) {
+        continue;
+      }
+
+      presenceById[desktopId] = {
+        status: session.status,
+        lastSeenAt: session.lastSeenAt
+      };
+    }
+
+    return presenceById;
+  }, [desktopSessions]);
   const visibleTasks = useMemo(
     () =>
       filterLocalTasks(
@@ -353,13 +366,6 @@ export default function App() {
           if (payload.session.clientType === "desktop") {
             const desktopId = getDesktopId(payload.session);
             if (desktopId) {
-              if (payload.session.status === "offline") {
-                setDesktopSessions((current) =>
-                  current.filter((session) => getDesktopId(session) !== desktopId)
-                );
-                return;
-              }
-
               setDesktopSessions((current) => {
                 const withoutCurrent = current.filter(
                   (session) => getDesktopId(session) !== desktopId
@@ -794,6 +800,7 @@ export default function App() {
           </TouchableWithoutFeedback>
           <BoundDesktopDrawer
             activeDesktopId={activeBoundDesktopId}
+            desktopPresenceById={desktopPresenceById}
             desktops={boundDesktops}
             isOpen={isDesktopDrawerOpen}
             onClose={() => setDesktopDrawerOpen(false)}

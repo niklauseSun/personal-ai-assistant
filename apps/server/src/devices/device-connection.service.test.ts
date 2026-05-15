@@ -93,6 +93,43 @@ describe("DeviceConnectionService", () => {
     assert.equal(await service.getServerPersistenceMode("binding-relay"), "relay_only");
   });
 
+  it("updates desktop lastSeenAt from heartbeat", async () => {
+    const registered = await service.register("socket-heartbeat", {
+      deviceId: "binding-heartbeat",
+      deviceName: "Mac mini",
+      clientType: "desktop",
+      metadata: {
+        desktopId: "desktop-heartbeat",
+        serverPersistence: "persist"
+      }
+    });
+
+    const heartbeat = await service.heartbeat("socket-heartbeat", {
+      deviceId: "binding-heartbeat",
+      clientType: "desktop",
+      desktopId: "desktop-heartbeat",
+      sentAt: "2026-05-15T00:00:00.000Z"
+    });
+
+    assert.equal(heartbeat.session.status, "online");
+    assert.equal(heartbeat.session.metadata?.desktopId, "desktop-heartbeat");
+    assert.ok(
+      Date.parse(heartbeat.session.lastSeenAt) >= Date.parse(registered.session.lastSeenAt)
+    );
+
+    const session = await prisma.deviceSession.findUnique({
+      where: {
+        deviceId_clientType: {
+          deviceId: "binding-heartbeat",
+          clientType: "desktop"
+        }
+      }
+    });
+
+    assert.equal(session?.status, "online");
+    assert.ok(session?.lastSeenAt);
+  });
+
   it("marks a disconnected socket offline", async () => {
     await service.register("socket-desktop", {
       deviceId: "binding-2",

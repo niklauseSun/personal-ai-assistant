@@ -15,6 +15,8 @@ import { WS_EVENTS, WS_NAMESPACE } from "@personal-ai-assistant/shared";
 import { io, type Socket } from "socket.io-client";
 import { Logger } from "./logger";
 
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+
 export interface DesktopWebSocketClientOptions {
   serverUrl: string;
   deviceId: string;
@@ -22,6 +24,7 @@ export interface DesktopWebSocketClientOptions {
   deviceName?: string;
   clientVersion?: string;
   serverPersistence?: ServerPersistenceMode;
+  heartbeatIntervalMs?: number;
   logger?: Logger;
 }
 
@@ -37,6 +40,7 @@ export class DesktopWebSocketClient {
   private taskCancelHandler?: TaskCancelHandler;
   private approvalSubmitHandler?: ApprovalSubmitHandler;
   private deviceOnlineHandler?: DeviceOnlineHandler;
+  private heartbeatTimer?: ReturnType<typeof setInterval>;
 
   constructor(private readonly options: DesktopWebSocketClientOptions) {
     this.logger = options.logger ?? new Logger("websocket");
@@ -60,6 +64,7 @@ export class DesktopWebSocketClient {
   }
 
   disconnect() {
+    this.stopHeartbeat();
     this.socket.disconnect();
   }
 
@@ -115,9 +120,11 @@ export class DesktopWebSocketClient {
           serverPersistence: this.options.serverPersistence ?? "relay_only"
         }
       });
+      this.startHeartbeat();
     });
 
     this.socket.on("disconnect", (reason) => {
+      this.stopHeartbeat();
       this.logger.warn("disconnected", {
         reason
       });
@@ -180,6 +187,41 @@ export class DesktopWebSocketClient {
       });
       this.approvalSubmitHandler?.(payload);
     });
+  }
+
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.sendHeartbeat();
+    this.heartbeatTimer = setInterval(
+      () => this.sendHeartbeat(),
+      this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
+    );
+  }
+
+  private stopHeartbeat() {
+    if (!this.heartbeatTimer) {
+      return;
+    }
+
+    clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
+  }
+
+  private sendHeartbeat() {
+    if (!this.socket.connected) {
+      return;
+    }
+
+    this.socket.emit(WS_EVENTS.DEVICE_HEARTBEAT, {
+      deviceId: this.options.deviceId,
+      clientType: "desktop",
+      desktopId: this.options.desktopId,
+      sentAt: new Date().toISOString(),
+      metadata: {
+        desktopId: this.options.desktopId,
+        serverPersistence: this.options.serverPersistence ?? "relay_only"
+      }
+    } satisfies ClientToServerEventPayloads[typeof WS_EVENTS.DEVICE_HEARTBEAT]);
   }
 
   private emit<EventName extends keyof ClientToServerEventPayloads>(

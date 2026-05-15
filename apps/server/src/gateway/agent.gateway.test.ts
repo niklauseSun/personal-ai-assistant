@@ -211,4 +211,49 @@ describe("AgentGateway relay-only mode", () => {
     );
     assert.equal(await prisma.agentTask.count(), 0);
   });
+
+  it("relays desktop heartbeat as an online update to mobile clients", async () => {
+    const desktop = new FakeSocket("desktop-heartbeat-socket");
+    const mobile = new FakeSocket("mobile-heartbeat-socket");
+
+    await gateway.handleDeviceRegister(
+      {
+        deviceId: "binding-heartbeat",
+        deviceName: "MacBook",
+        clientType: "desktop",
+        metadata: {
+          desktopId: "desktop-heartbeat",
+          serverPersistence: "relay_only"
+        }
+      },
+      desktop as unknown as Socket
+    );
+    await gateway.handleDeviceRegister(
+      {
+        deviceId: "binding-heartbeat",
+        clientType: "mobile"
+      },
+      mobile as unknown as Socket
+    );
+
+    const response = await gateway.handleDeviceHeartbeat(
+      {
+        deviceId: "binding-heartbeat",
+        clientType: "desktop",
+        desktopId: "desktop-heartbeat"
+      },
+      desktop as unknown as Socket
+    );
+
+    assert.equal(response.session.status, "online");
+    assert.equal(response.session.metadata?.desktopId, "desktop-heartbeat");
+    assert.ok(
+      server.emissions.some(
+        (emission) =>
+          emission.room === DeviceConnectionService.roomName("binding-heartbeat", "mobile") &&
+          emission.eventName === WS_EVENTS.DEVICE_ONLINE &&
+          (emission.payload as { session: { status: string } }).session.status === "online"
+      )
+    );
+  });
 });

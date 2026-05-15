@@ -14,6 +14,7 @@ export const WS_NAMESPACE = "/tasks";
 
 export const WS_EVENTS = {
   DEVICE_REGISTER: "device.register",
+  DEVICE_HEARTBEAT: "device.heartbeat",
   DEVICE_ONLINE: "device.online",
   TASK_CREATE: "task.create",
   TASK_CREATED: "task.created",
@@ -30,6 +31,7 @@ export const WS_EVENTS = {
 
 export const WS_EVENT_NAMES = [
   WS_EVENTS.DEVICE_REGISTER,
+  WS_EVENTS.DEVICE_HEARTBEAT,
   WS_EVENTS.DEVICE_ONLINE,
   WS_EVENTS.TASK_CREATE,
   WS_EVENTS.TASK_CREATED,
@@ -57,6 +59,14 @@ export interface DeviceRegisterPayload {
 export interface DeviceOnlinePayload {
   session: DeviceSession;
   serverTime: string;
+}
+
+export interface DeviceHeartbeatPayload {
+  deviceId: Id;
+  clientType?: ClientType;
+  desktopId?: Id;
+  sentAt?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface TaskCreatePayload {
@@ -135,6 +145,7 @@ export interface TaskRelayFailedPayload {
 
 export interface ClientToServerEventPayloads {
   [WS_EVENTS.DEVICE_REGISTER]: DeviceRegisterPayload;
+  [WS_EVENTS.DEVICE_HEARTBEAT]: DeviceHeartbeatPayload;
   [WS_EVENTS.TASK_CREATE]: TaskCreatePayload;
   [WS_EVENTS.TASK_STARTED]: TaskStartedPayload;
   [WS_EVENTS.TASK_OUTPUT]: TaskOutputPayload;

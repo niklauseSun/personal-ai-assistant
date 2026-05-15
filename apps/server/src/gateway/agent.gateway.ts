@@ -62,12 +62,11 @@ export class AgentGateway implements OnGatewayDisconnect {
         clientType: "desktop",
         status: "offline",
         deviceName: binding.deviceName,
+        clientVersion: binding.clientVersion,
         connectionId: client.id,
-        registeredAt: serverTime,
-        lastSeenAt: serverTime,
-        metadata: {
-          desktopId: binding.desktopId
-        }
+        registeredAt: binding.registeredAt,
+        lastSeenAt: binding.lastSeenAt,
+        metadata: binding.metadata
       },
       serverTime
     });
@@ -102,6 +101,22 @@ export class AgentGateway implements OnGatewayDisconnect {
         this.emitOnlineDesktopSessions(client, response.session.deviceId, response.serverTime);
       }
 
+      return response;
+    } catch (error) {
+      throw this.toWsException(error);
+    }
+  }
+
+  @SubscribeMessage(WS_EVENTS.DEVICE_HEARTBEAT)
+  async handleDeviceHeartbeat(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    try {
+      const response = await this.deviceConnectionService.heartbeat(client.id, payload);
+      this.emitToClientType(
+        response.session.deviceId,
+        "mobile",
+        WS_EVENTS.DEVICE_ONLINE,
+        response
+      );
       return response;
     } catch (error) {
       throw this.toWsException(error);
@@ -433,12 +448,11 @@ export class AgentGateway implements OnGatewayDisconnect {
           clientType: "desktop",
           status: "online",
           deviceName: desktop.deviceName,
+          clientVersion: desktop.clientVersion,
           connectionId: desktop.connectionId,
-          registeredAt: serverTime,
-          lastSeenAt: serverTime,
-          metadata: {
-            desktopId: desktop.desktopId
-          }
+          registeredAt: desktop.registeredAt,
+          lastSeenAt: desktop.lastSeenAt,
+          metadata: desktop.metadata
         },
         serverTime
       });

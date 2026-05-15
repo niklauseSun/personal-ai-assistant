@@ -2,9 +2,15 @@ import type { MobileBoundDesktop } from "@personal-ai-assistant/shared";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, sharedStyles } from "../ui/styles";
 
+export interface DesktopPresence {
+  status: "online" | "offline";
+  lastSeenAt: string;
+}
+
 interface BoundDesktopDrawerProps {
   activeDesktopId?: string;
   desktops: MobileBoundDesktop[];
+  desktopPresenceById: Record<string, DesktopPresence>;
   isOpen: boolean;
   onClose: () => void;
   onDelete: (desktopId: string) => void;
@@ -15,6 +21,7 @@ interface BoundDesktopDrawerProps {
 export function BoundDesktopDrawer({
   activeDesktopId,
   desktops,
+  desktopPresenceById,
   isOpen,
   onClose,
   onDelete,
@@ -56,6 +63,8 @@ export function BoundDesktopDrawer({
           ) : (
             desktops.map((desktop) => {
               const isActive = desktop.id === activeDesktopId;
+              const presence = desktopPresenceById[desktop.desktopId];
+              const status = presence?.status ?? "offline";
 
               return (
                 <View
@@ -73,6 +82,18 @@ export function BoundDesktopDrawer({
                     </Text>
                     <Text numberOfLines={1} style={styles.tokenText}>
                       {desktop.deviceId}
+                    </Text>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.presenceText,
+                        status === "online" ? styles.onlineText : styles.offlineText
+                      ]}
+                    >
+                      {status === "online" ? "Online" : "Offline"}
+                      {presence
+                        ? ` - Last seen ${new Date(presence.lastSeenAt).toLocaleString()}`
+                        : ""}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -142,6 +163,16 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: 10
+  },
+  offlineText: {
+    color: colors.muted
+  },
+  onlineText: {
+    color: colors.primary
+  },
+  presenceText: {
+    fontSize: 12,
+    fontWeight: "700"
   },
   scrim: {
     backgroundColor: "rgba(15, 23, 42, 0.36)",

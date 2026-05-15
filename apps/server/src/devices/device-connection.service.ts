@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import type {
   ClientType,
+  DeviceHeartbeatPayload,
   DeviceOnlinePayload,
   DeviceRegisterPayload,
   ServerPersistenceMode
@@ -20,6 +21,10 @@ export interface SocketBinding {
   clientType: ClientType;
   desktopId?: string;
   deviceName?: string;
+  clientVersion?: string;
+  registeredAt: string;
+  lastSeenAt: string;
+  metadata?: Record<string, unknown>;
 }
 
 @Injectable()
@@ -92,11 +97,18 @@ export class DeviceConnectionService {
             lastSeenAt: now
           };
 
+    const registeredAt = session.registeredAt.toISOString();
+    const lastSeenAt = session.lastSeenAt.toISOString();
+
     this.socketBindings.set(socketId, {
       deviceId: payload.deviceId,
       clientType: payload.clientType,
       desktopId,
-      deviceName: payload.deviceName
+      deviceName: payload.deviceName,
+      clientVersion: payload.clientVersion,
+      registeredAt,
+      lastSeenAt,
+      metadata
     });
 
     if (payload.clientType === "desktop") {
@@ -117,16 +129,57 @@ export class DeviceConnectionService {
         deviceName: session.deviceName ?? undefined,
         clientVersion: session.clientVersion ?? undefined,
         connectionId: socketId,
-        registeredAt: session.registeredAt.toISOString(),
-        lastSeenAt: session.lastSeenAt.toISOString(),
+        registeredAt,
+        lastSeenAt,
         metadata
       },
       serverTime: now.toISOString()
     };
   }
 
+  async heartbeat(socketId: string, rawPayload: unknown): Promise<DeviceOnlinePayload> {
+    const binding = this.requireSocketBinding(socketId, "desktop");
+    const payload = this.parseHeartbeatPayload(rawPayload);
+    if (payload.deviceId !== binding.deviceId) {
+      throw new BadRequestException("device.heartbeat deviceId must match registered device");
+    }
+
+    if (payload.clientType && payload.clientType !== "desktop") {
+      throw new BadRequestException("device.heartbeat requires a desktop client");
+    }
+
+    if (payload.desktopId && payload.desktopId !== binding.desktopId) {
+      throw new BadRequestException("device.heartbeat desktopId must match registered desktop");
+    }
+
+    const now = new Date();
+    const lastSeenAt = now.toISOString();
+    binding.lastSeenAt = lastSeenAt;
+
+    if (this.prisma.isStorageEnabled()) {
+      await this.prisma.deviceSession.updateMany({
+        where: {
+          socketId
+        },
+        data: {
+          status: "online",
+          lastSeenAt: now
+        }
+      });
+    }
+
+    return {
+      session: this.toDeviceSession(binding, socketId, "online"),
+      serverTime: lastSeenAt
+    };
+  }
+
   async markDisconnected(socketId: string) {
     const binding = this.socketBindings.get(socketId);
+    const disconnectedAt = new Date();
+    if (binding) {
+      binding.lastSeenAt = disconnectedAt.toISOString();
+    }
     this.socketBindings.delete(socketId);
 
     if (this.prisma.isStorageEnabled()) {
@@ -137,7 +190,7 @@ export class DeviceConnectionService {
         data: {
           socketId: null,
           status: "offline",
-          lastSeenAt: new Date()
+          lastSeenAt: disconnectedAt
         }
       });
     }
@@ -157,7 +210,11 @@ export class DeviceConnectionService {
         clientType: binding.clientType,
         desktopId: binding.desktopId,
         deviceName: binding.deviceName,
-        connectionId: socketId
+        clientVersion: binding.clientVersion,
+        connectionId: socketId,
+        registeredAt: binding.registeredAt,
+        lastSeenAt: binding.lastSeenAt,
+        metadata: binding.metadata
       }));
   }
 
@@ -223,6 +280,41 @@ export class DeviceConnectionService {
       deviceName: optionalString(rawPayload.deviceName, "deviceName"),
       clientVersion: optionalString(rawPayload.clientVersion, "clientVersion"),
       metadata: optionalRecord(rawPayload.metadata, "metadata")
+    };
+  }
+
+  private parseHeartbeatPayload(rawPayload: unknown): DeviceHeartbeatPayload {
+    assertObject(rawPayload, "device.heartbeat payload");
+
+    const clientType = optionalString(rawPayload.clientType, "clientType");
+    if (clientType !== undefined && clientType !== "desktop" && clientType !== "mobile") {
+      throw new BadRequestException("clientType must be desktop or mobile");
+    }
+
+    return {
+      deviceId: requireString(rawPayload.deviceId, "deviceId"),
+      clientType,
+      desktopId: optionalString(rawPayload.desktopId, "desktopId"),
+      sentAt: optionalString(rawPayload.sentAt, "sentAt"),
+      metadata: optionalRecord(rawPayload.metadata, "metadata")
+    };
+  }
+
+  private toDeviceSession(
+    binding: SocketBinding,
+    socketId: string,
+    status: "online" | "offline"
+  ) {
+    return {
+      deviceId: binding.deviceId,
+      clientType: binding.clientType,
+      status,
+      deviceName: binding.deviceName,
+      clientVersion: binding.clientVersion,
+      connectionId: socketId,
+      registeredAt: binding.registeredAt,
+      lastSeenAt: binding.lastSeenAt,
+      metadata: binding.metadata
     };
   }
 

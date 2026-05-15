@@ -27,6 +27,7 @@ type Expect<Condition extends true> = Condition;
 
 type RequiredEventNames =
   | "device.register"
+  | "device.heartbeat"
   | "device.online"
   | "task.create"
   | "task.created"
@@ -88,6 +89,13 @@ const registerPayload: ClientToServerEventPayloads[typeof WS_EVENTS.DEVICE_REGIS
   deviceId: "mobile-1",
   clientType: "mobile",
   deviceName: "iPhone"
+};
+
+const heartbeatPayload: ClientToServerEventPayloads[typeof WS_EVENTS.DEVICE_HEARTBEAT] = {
+  deviceId: "mobile-1",
+  clientType: "desktop",
+  desktopId: "desktop-1",
+  sentAt: createdAt
 };
 
 const onlinePayload: ServerToClientEventPayloads[typeof WS_EVENTS.DEVICE_ONLINE] = {
@@ -211,6 +219,7 @@ const requiredEventsArePresent: RequiredEventsArePresent = true;
 
 void requiredEventsArePresent;
 void registerPayload;
+void heartbeatPayload;
 void onlinePayload;
 void createPayload;
 void createdPayload;
