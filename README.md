@@ -40,6 +40,12 @@ pnpm --filter @personal-ai-assistant/server start
 Server tests use `TEST_DATABASE_URL`. The provided compose file exposes the test database on
 `localhost:5433`.
 
+## Mobile Animation Rule
+
+For React Native animation code, use `react-native-reanimated`. Do not import or require
+`Animated` from `react-native`. The mobile `typecheck` script runs
+`pnpm check:animations` to enforce this rule.
+
 ## Architecture Notes
 
 See [docs/architecture.md](docs/architecture.md).

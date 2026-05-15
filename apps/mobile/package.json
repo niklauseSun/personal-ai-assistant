@@ -5,9 +5,10 @@
   "main": "index.js",
   "scripts": {
     "android": "expo run:android",
+    "check:animations": "node scripts/check-no-react-native-animated.mjs",
     "ios": "expo run:ios",
     "start": "expo start",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "pnpm check:animations && tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@personal-ai-assistant/shared": "workspace:*",
@@ -18,6 +19,7 @@
     "expo-system-ui": "~5.0.11",
     "react": "^19.0.0",
     "react-native": "^0.79.0",
+    "react-native-reanimated": "~3.17.5",
     "socket.io-client": "^4.8.3",
     "zustand": "^5.0.13"
   },
