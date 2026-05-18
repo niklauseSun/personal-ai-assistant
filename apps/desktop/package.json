@@ -5,7 +5,7 @@
   "main": "dist/main/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.node.json && vite build",
-    "dev": "concurrently \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && electron .\"",
+    "dev": "pnpm --dir ../.. --filter @personal-ai-assistant/shared build && concurrently \"tsc -p tsconfig.node.json --watch\" \"vite --host 127.0.0.1\" \"wait-on dist/main/main.js tcp:5173 && electron .\"",
     "test": "tsx --test src/main/**/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },

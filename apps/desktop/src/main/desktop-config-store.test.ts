@@ -79,4 +79,17 @@ describe("DesktopConfigStore", () => {
     assert.equal(loaded.bindings[0].deviceId, "mobile-a");
     assert.equal(loaded.bindings[1].enabled, false);
   });
+
+  it("preserves an intentionally empty server URL when the user clears it", () => {
+    const config = normalizeConfig(
+      {
+        serverUrl: "   ",
+        desktopName: "Desk"
+      },
+      fallback
+    );
+
+    assert.equal(config.serverUrl, "");
+    assert.equal(config.desktopName, "Desk");
+  });
 });

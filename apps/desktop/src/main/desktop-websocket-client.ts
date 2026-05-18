@@ -41,6 +41,7 @@ export class DesktopWebSocketClient {
   private approvalSubmitHandler?: ApprovalSubmitHandler;
   private deviceOnlineHandler?: DeviceOnlineHandler;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
+  private hasLoggedUnavailableServer = false;
 
   constructor(private readonly options: DesktopWebSocketClientOptions) {
     this.logger = options.logger ?? new Logger("websocket");
@@ -106,6 +107,7 @@ export class DesktopWebSocketClient {
 
   private registerSocketHandlers() {
     this.socket.on("connect", () => {
+      this.hasLoggedUnavailableServer = false;
       this.logger.info("connected", {
         socketId: this.socket.id
       });
@@ -131,8 +133,14 @@ export class DesktopWebSocketClient {
     });
 
     this.socket.on("connect_error", (error) => {
-      this.logger.error("connection failed", {
-        message: error.message
+      if (this.hasLoggedUnavailableServer) {
+        return;
+      }
+
+      this.hasLoggedUnavailableServer = true;
+      this.logger.warn("server unavailable; desktop remains available offline", {
+        message: error.message,
+        serverUrl: this.options.serverUrl
       });
     });
 

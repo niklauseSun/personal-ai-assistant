@@ -23,6 +23,11 @@ export class DesktopBackendManager {
   }
 
   start(config: DesktopAppConfig) {
+    if (!config.serverUrl.trim()) {
+      this.logger.warn("server URL is empty; desktop stays in local setup mode");
+      return;
+    }
+
     const enabledBindings = config.bindings.filter((binding) => binding.enabled);
     if (enabledBindings.length === 0) {
       this.logger.warn("no enabled mobile bindings; desktop will not receive tasks");
