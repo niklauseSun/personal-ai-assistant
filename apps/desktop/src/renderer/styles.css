@@ -50,6 +50,22 @@ textarea {
   padding: 20px;
 }
 
+.setup-section {
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 111, 0.12), transparent 32%),
+    linear-gradient(180deg, #ffffff 0%, #f7fbfb 100%);
+}
+
+.compact-setup {
+  max-width: 720px;
+}
+
+.compact-setup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .section-heading {
   align-items: flex-start;
   display: flex;
@@ -91,6 +107,15 @@ h2 {
   margin-top: 8px;
 }
 
+.preview-banner {
+  background: #eef8ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  color: #1d4ed8;
+  margin-top: 12px;
+  padding: 10px 12px;
+}
+
 .status-pill {
   background: #eaf7f8;
   border: 1px solid #b9e2e6;
@@ -102,10 +127,43 @@ h2 {
   white-space: nowrap;
 }
 
+.server-status {
+  border: 1px solid #d7dde8;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+.server-status.available {
+  background: #ecfdf3;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.server-status.checking {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.server-status.unavailable {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #c2410c;
+}
+
 .form-grid {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.setup-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
 }
 
 .field {
@@ -113,6 +171,39 @@ h2 {
   flex-direction: column;
   gap: 7px;
   min-width: 0;
+}
+
+.action-field {
+  justify-content: flex-end;
+}
+
+.setup-form,
+.setup-qr-panel,
+.pairing-copy,
+.setup-meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.setup-form,
+.pairing-copy,
+.setup-meta {
+  gap: 12px;
+}
+
+.setup-qr-panel {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid #d8e6e8;
+  border-radius: 12px;
+  gap: 14px;
+  padding: 18px;
+}
+
+.setup-meta {
+  color: #4b5563;
+  font-size: 13px;
+  gap: 6px;
 }
 
 .field span,
@@ -180,6 +271,7 @@ textarea:disabled {
 .button-row {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .binding-row {
@@ -351,6 +443,11 @@ textarea:disabled {
   padding: 18px;
 }
 
+.qr-frame.large {
+  min-height: 332px;
+  width: 100%;
+}
+
 .qr-frame img {
   display: block;
   height: 260px;
@@ -381,7 +478,8 @@ textarea:disabled {
     flex-direction: column;
   }
 
-  .form-grid {
+  .form-grid,
+  .setup-grid {
     grid-template-columns: 1fr;
   }
 
@@ -397,5 +495,9 @@ textarea:disabled {
 
   .pairing-body {
     display: flex;
+  }
+
+  .qr-frame.large {
+    min-height: 300px;
   }
 }

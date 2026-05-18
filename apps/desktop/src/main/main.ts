@@ -8,6 +8,7 @@ import { Logger } from "./logger";
 let backendManager: DesktopBackendManager | undefined;
 let configStore: DesktopConfigStore | undefined;
 let currentConfig: DesktopAppConfig | undefined;
+const startupLogger = new Logger("startup");
 
 async function startDesktopBackend() {
   const logger = new Logger("main");
@@ -65,10 +66,14 @@ function createWindow() {
   void window.loadFile(path.join(__dirname, "../renderer/index.html"));
 }
 
-void app.whenReady().then(async () => {
+void app.whenReady().then(() => {
   registerIpcHandlers();
-  await startDesktopBackend();
   createWindow();
+  void startDesktopBackend().catch((error) => {
+    startupLogger.warn("desktop backend failed to start; UI remains available offline", {
+      message: error instanceof Error ? error.message : String(error)
+    });
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

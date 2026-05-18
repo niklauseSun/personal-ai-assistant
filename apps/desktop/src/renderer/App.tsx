@@ -3,14 +3,18 @@ import { createDesktopPairingPayload } from "@personal-ai-assistant/shared";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 
+const BROWSER_CONFIG_STORAGE_KEY = "personal-ai-assistant.desktop-config";
+const DEFAULT_SERVER_URL = "http://localhost:3000";
+
 const emptyConfig: DesktopAppConfig = {
-  serverUrl: "http://localhost:3000",
+  serverUrl: DEFAULT_SERVER_URL,
   desktopName: "Desktop",
   serverPersistence: "relay_only",
   bindings: []
 };
 
 export function App() {
+  const isBrowserPreview = typeof window !== "undefined" && !window.desktopShell;
   const [config, setConfig] = useState<DesktopAppConfig>(emptyConfig);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -18,19 +22,34 @@ export function App() {
   const [qrBindingId, setQrBindingId] = useState<string>();
   const [qrDataUrl, setQrDataUrl] = useState<string>();
   const [qrError, setQrError] = useState<string>();
+  const [serverStatus, setServerStatus] = useState<"checking" | "available" | "unavailable">(
+    "checking"
+  );
+  const configuredServerUrl = config.serverUrl.trim();
   const enabledCount = useMemo(
     () => config.bindings.filter((binding) => binding.enabled).length,
+    [config.bindings]
+  );
+  const needsServerSetup = configuredServerUrl.length === 0 || serverStatus === "unavailable";
+  const connectionModeLabel = needsServerSetup
+    ? configuredServerUrl
+      ? "Server unavailable"
+      : "Server not configured"
+    : `${enabledCount} enabled`;
+  const primaryBinding = useMemo(
+    () => config.bindings[0],
     [config.bindings]
   );
   const qrBinding = useMemo(
     () => config.bindings.find((binding) => binding.id === qrBindingId),
     [config.bindings, qrBindingId]
   );
+  const setupBinding = primaryBinding;
 
   useEffect(() => {
     let isMounted = true;
 
-    if (!qrBinding) {
+    if (!qrBinding || !configuredServerUrl) {
       setQrDataUrl(undefined);
       setQrError(undefined);
       return () => {
@@ -60,17 +79,60 @@ export function App() {
     return () => {
       isMounted = false;
     };
-  }, [config, qrBinding]);
+  }, [config, configuredServerUrl, qrBinding]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const controller = new AbortController();
+
+    if (!configuredServerUrl) {
+      setServerStatus("unavailable");
+      return () => {
+        controller.abort();
+      };
+    }
+
+    setServerStatus("checking");
+
+    fetch(`${configuredServerUrl.replace(/\/$/, "")}/health`, {
+      signal: controller.signal
+    })
+      .then((response) => {
+        if (!isMounted) {
+          return;
+        }
+
+        setServerStatus(response.ok ? "available" : "unavailable");
+      })
+      .catch(() => {
+        if (!isMounted || controller.signal.aborted) {
+          return;
+        }
+
+        setServerStatus("unavailable");
+      });
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [configuredServerUrl]);
 
   useEffect(() => {
     let isMounted = true;
 
-    window.desktopShell
+    getDesktopShell()
       .getConfig()
       .then((nextConfig) => {
-        if (isMounted) {
-          setConfig(nextConfig);
-          setMessage(undefined);
+        if (!isMounted) {
+          return;
+        }
+
+        const hydratedConfig = ensureAtLeastOneBinding(nextConfig);
+        setConfig(hydratedConfig);
+        setMessage(undefined);
+        if (hydratedConfig.bindings[0]) {
+          setQrBindingId(hydratedConfig.bindings[0].id);
         }
       })
       .catch((error) => {
@@ -119,33 +181,20 @@ export function App() {
   };
 
   const addBinding = () => {
-    const now = new Date().toISOString();
-    setConfig((current) => ({
-      ...current,
-      bindings: [
-        ...current.bindings,
-        {
-          id: createBindingId(),
-          deviceId: "",
-          displayName: "",
-          enabled: true,
-          createdAt: now,
-          updatedAt: now
-        }
-      ]
-    }));
+    const nextConfig = {
+      ...config,
+      bindings: [...config.bindings, createBinding()]
+    };
+    setConfig(nextConfig);
+    if (!qrBindingId) {
+      setQrBindingId(nextConfig.bindings[0]?.id);
+    }
   };
 
   const createPairingBinding = async () => {
-    const now = new Date().toISOString();
-    const binding: DesktopMobileBinding = {
-      id: createBindingId(),
-      deviceId: createDeviceToken(),
-      displayName: "Mobile",
-      enabled: true,
-      createdAt: now,
-      updatedAt: now
-    };
+    const binding = createBinding({
+      displayName: "Mobile"
+    });
     const nextConfig = {
       ...config,
       serverPersistence: "relay_only" as const,
@@ -157,11 +206,29 @@ export function App() {
     await persistConfig(nextConfig, "Binding token created. Scan the QR code from mobile.");
   };
 
+  const saveServerSetup = async () => {
+    const serverUrl = config.serverUrl.trim();
+    if (!serverUrl) {
+      setMessage("Enter a server URL to enable mobile relay and QR pairing.");
+      return;
+    }
+
+    const hydratedConfig = ensureAtLeastOneBinding({
+      ...config,
+      serverUrl
+    });
+    setQrBindingId(hydratedConfig.bindings[0].id);
+    await persistConfig(hydratedConfig, "Server saved. Mobile relay is ready for QR pairing.");
+  };
+
   const removeBinding = (bindingId: string) => {
-    setConfig((current) => ({
-      ...current,
-      bindings: current.bindings.filter((binding) => binding.id !== bindingId)
-    }));
+    setConfig((current) => {
+      const nextBindings = current.bindings.filter((binding) => binding.id !== bindingId);
+      return {
+        ...current,
+        bindings: nextBindings
+      };
+    });
     if (qrBindingId === bindingId) {
       setQrBindingId(undefined);
     }
@@ -171,19 +238,33 @@ export function App() {
     await persistConfig(
       {
         ...config,
+        serverUrl: config.serverUrl.trim(),
         serverPersistence: "relay_only"
       },
-      "Saved. Desktop WebSocket bindings were reloaded."
+      configuredServerUrl
+        ? "Saved. Desktop WebSocket bindings were reloaded."
+        : "Saved. Desktop remains in local-only mode until a server URL is configured."
     );
+  };
+
+  const resetServerUrl = () => {
+    setConfig((current) => ({
+      ...current,
+      serverUrl: DEFAULT_SERVER_URL
+    }));
+    setMessage(`Server URL reset to ${DEFAULT_SERVER_URL}.`);
   };
 
   const persistConfig = async (nextConfig: DesktopAppConfig, successMessage: string) => {
     setIsSaving(true);
     try {
-      const savedConfig = await window.desktopShell.saveConfig({
-        ...nextConfig,
-        serverPersistence: "relay_only"
-      });
+      const savedConfig = ensureAtLeastOneBinding(
+        await getDesktopShell().saveConfig({
+          ...nextConfig,
+          serverUrl: nextConfig.serverUrl.trim(),
+          serverPersistence: "relay_only"
+        })
+      );
       setConfig(savedConfig);
       setMessage(successMessage);
     } catch (error) {
@@ -195,17 +276,94 @@ export function App() {
 
   return (
     <main className="shell">
+      {needsServerSetup ? (
+        <>
+          <section className="page-header" aria-labelledby="desktop-title">
+            <div>
+              <p className="eyebrow">Desktop</p>
+              <h1 id="desktop-title">Bind mobile</h1>
+              {isBrowserPreview ? (
+                <p className="preview-banner">
+                  Browser preview mode: settings are stored in localStorage until the Electron app
+                  loads this page with its desktop bridge.
+                </p>
+              ) : null}
+            </div>
+            <div className="status-pill" aria-label="Connection status">
+              {connectionModeLabel}
+            </div>
+          </section>
+
+          <section className="section setup-section compact-setup" aria-labelledby="setup-title">
+            <div className="compact-setup-body">
+              <label className="field">
+                <span>Server URL</span>
+                <input
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  disabled={isLoading}
+                  onChange={(event) => updateConfig("serverUrl", event.target.value)}
+                  placeholder={DEFAULT_SERVER_URL}
+                  value={config.serverUrl}
+                />
+              </label>
+
+              <div className="button-row">
+                <button
+                  className="button secondary"
+                  disabled={isLoading || isSaving}
+                  onClick={resetServerUrl}
+                >
+                  Reset
+                </button>
+                <button
+                  className="button primary"
+                  disabled={isLoading || isSaving}
+                  onClick={() => void saveServerSetup()}
+                >
+                  {isSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+
+              <div className="qr-frame large">
+                {configuredServerUrl && qrBinding && qrDataUrl ? (
+                  <img alt="Desktop setup QR code" src={qrDataUrl} />
+                ) : (
+                  <div className="qr-placeholder">
+                    {qrError || "Save the server URL to generate the mobile binding QR code."}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <footer className="footer">
+            <div aria-live="polite" className={message?.startsWith("Saved") ? "success" : "error"}>
+              {message}
+            </div>
+          </footer>
+        </>
+      ) : null}
+
+      {!needsServerSetup ? (
+        <>
       <section className="page-header" aria-labelledby="desktop-title">
         <div>
           <p className="eyebrow">Desktop</p>
           <h1 id="desktop-title">Device bindings</h1>
           <p className="muted">
-            Bind this desktop to one or more mobile device IDs. Each enabled binding opens a
-            desktop WebSocket connection for that mobile device.
+            This desktop works locally on its own. The default relay address is localhost, and you
+            can change it whenever you need to bind mobile devices through another server.
           </p>
+          {isBrowserPreview ? (
+            <p className="preview-banner">
+              Browser preview mode: settings are stored in localStorage until the Electron app
+              loads this page with its desktop bridge.
+            </p>
+          ) : null}
         </div>
         <div className="status-pill" aria-label="Enabled mobile bindings">
-          {enabledCount} enabled
+          {connectionModeLabel}
         </div>
       </section>
 
@@ -213,7 +371,17 @@ export function App() {
         <div className="section-heading">
           <div>
             <h2 id="connection-title">Connection</h2>
-            <p className="muted">These settings apply to every enabled mobile binding.</p>
+            <p className="muted">
+              The desktop starts with localhost by default. You can edit the relay address or reset
+              it back to localhost at any time.
+            </p>
+          </div>
+          <div className={`server-status ${serverStatus}`}>
+            {serverStatus === "available"
+              ? "Server reachable"
+              : serverStatus === "checking"
+                ? "Checking server..."
+                : "Server unavailable"}
           </div>
         </div>
 
@@ -225,7 +393,7 @@ export function App() {
               autoCorrect="off"
               disabled={isLoading}
               onChange={(event) => updateConfig("serverUrl", event.target.value)}
-              placeholder="http://localhost:3000"
+              placeholder={DEFAULT_SERVER_URL}
               value={config.serverUrl}
             />
           </label>
@@ -240,6 +408,12 @@ export function App() {
               value={config.desktopName}
             />
           </label>
+          <div className="field action-field">
+            <span>Relay address</span>
+            <button className="button secondary" disabled={isLoading || isSaving} onClick={resetServerUrl}>
+              Reset to localhost
+            </button>
+          </div>
           <label className="field field-wide">
             <span>Default workspace path</span>
             <input
@@ -258,17 +432,18 @@ export function App() {
         <div className="section-heading">
           <div>
             <h2 id="bindings-title">Mobile bindings</h2>
-          <p className="muted">
-            Create a token for each phone, then scan its QR code in the mobile app.
-          </p>
+            <p className="muted">
+              Manage binding tokens here. QR pairing stays available even when the server is down,
+              so you can prepare mobile binding before the backend comes online.
+            </p>
           </div>
           <div className="button-row">
             <button
               className="button primary"
-              disabled={isLoading || isSaving}
+              disabled={isLoading || isSaving || !configuredServerUrl}
               onClick={() => void createPairingBinding()}
             >
-              Bind mobile
+              Bind mobile by QR
             </button>
             <button className="button secondary" disabled={isLoading} onClick={addBinding}>
               Add manually
@@ -280,7 +455,7 @@ export function App() {
           {config.bindings.length === 0 ? (
             <div className="empty-state">
               <strong>No bindings yet</strong>
-              <p className="muted">Add a mobile deviceId to receive tasks on this desktop.</p>
+              <p className="muted">Add a mobile device token to receive tasks on this desktop.</p>
             </div>
           ) : (
             config.bindings.map((binding) => (
@@ -322,7 +497,7 @@ export function App() {
                 </label>
                 <button
                   className="button secondary"
-                  disabled={isLoading || !binding.deviceId.trim()}
+                  disabled={isLoading || !configuredServerUrl || !binding.deviceId.trim()}
                   onClick={() => setQrBindingId(binding.id)}
                 >
                   QR
@@ -345,11 +520,13 @@ export function App() {
           {message}
         </div>
         <button className="button primary" disabled={isLoading || isSaving} onClick={saveConfig}>
-          {isSaving ? "Saving..." : "Save and reload bindings"}
+          {isSaving ? "Saving..." : "Save desktop settings"}
         </button>
       </footer>
+        </>
+      ) : null}
 
-      {qrBinding ? (
+      {qrBinding && configuredServerUrl && !needsServerSetup ? (
         <div className="modal-backdrop" role="presentation">
           <section
             aria-labelledby="pairing-title"
@@ -360,7 +537,9 @@ export function App() {
             <div className="section-heading">
               <div>
                 <h2 id="pairing-title">Bind mobile</h2>
-                <p className="muted">{qrBinding.displayName || "Mobile"} · {config.desktopName}</p>
+                <p className="muted">
+                  {qrBinding.displayName || "Mobile"} · {config.desktopName}
+                </p>
               </div>
               <button className="button secondary" onClick={() => setQrBindingId(undefined)}>
                 Close
@@ -377,7 +556,7 @@ export function App() {
               <div className="pairing-detail">
                 <label className="field">
                   <span>Server URL</span>
-                  <input readOnly value={config.serverUrl} />
+                  <input readOnly value={configuredServerUrl} />
                 </label>
                 <label className="field">
                   <span>Desktop ID</span>
@@ -400,6 +579,29 @@ export function App() {
   );
 }
 
+function createBinding(overrides: Partial<DesktopMobileBinding> = {}): DesktopMobileBinding {
+  const now = new Date().toISOString();
+  return {
+    id: overrides.id ?? createBindingId(),
+    deviceId: overrides.deviceId ?? createDeviceToken(),
+    displayName: overrides.displayName ?? "",
+    enabled: overrides.enabled ?? true,
+    createdAt: overrides.createdAt ?? now,
+    updatedAt: overrides.updatedAt ?? now
+  };
+}
+
+function ensureAtLeastOneBinding(config: DesktopAppConfig): DesktopAppConfig {
+  if (config.bindings.length > 0) {
+    return config;
+  }
+
+  return {
+    ...config,
+    bindings: [createBinding({ displayName: "Mobile" })]
+  };
+}
+
 function createBindingId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -414,10 +616,55 @@ function createDeviceToken() {
 
 function createPairingPayload(config: DesktopAppConfig, binding: DesktopMobileBinding) {
   return createDesktopPairingPayload({
-    serverUrl: config.serverUrl,
+    serverUrl: config.serverUrl.trim(),
     deviceToken: binding.deviceId,
     desktopId: binding.id,
     desktopName: config.desktopName,
     createdAt: binding.createdAt
   });
 }
+
+function getDesktopShell() {
+  if (typeof window !== "undefined" && window.desktopShell) {
+    return window.desktopShell;
+  }
+
+  return browserDesktopShell;
+}
+
+const browserDesktopShell = {
+  platform: "browser",
+  async getConfig() {
+    if (typeof window === "undefined") {
+      return emptyConfig;
+    }
+
+    const raw = window.localStorage.getItem(BROWSER_CONFIG_STORAGE_KEY);
+    if (!raw) {
+      const initialConfig = ensureAtLeastOneBinding(emptyConfig);
+      window.localStorage.setItem(BROWSER_CONFIG_STORAGE_KEY, JSON.stringify(initialConfig));
+      return initialConfig;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as DesktopAppConfig;
+      return ensureAtLeastOneBinding(parsed);
+    } catch {
+      const initialConfig = ensureAtLeastOneBinding(emptyConfig);
+      window.localStorage.setItem(BROWSER_CONFIG_STORAGE_KEY, JSON.stringify(initialConfig));
+      return initialConfig;
+    }
+  },
+  async saveConfig(config: DesktopAppConfig) {
+    const normalized = ensureAtLeastOneBinding({
+      ...config,
+      serverPersistence: "relay_only"
+    });
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(BROWSER_CONFIG_STORAGE_KEY, JSON.stringify(normalized));
+    }
+
+    return normalized;
+  }
+};

@@ -8,6 +8,7 @@ import type {
 } from "@personal-ai-assistant/shared";
 
 const CONFIG_FILE_NAME = "desktop-config.json";
+const DEFAULT_SERVER_URL = "http://localhost:3000";
 
 export class DesktopConfigStore {
   constructor(private readonly userDataPath: string) {}
@@ -40,17 +41,16 @@ export class DesktopConfigStore {
 
   private defaultConfig(): DesktopAppConfig {
     const now = new Date().toISOString();
-    const deviceId = process.env.DESKTOP_DEVICE_ID?.trim() || os.hostname();
     return {
-      serverUrl: process.env.SERVER_WS_URL?.trim() || "http://localhost:3000",
+      serverUrl: process.env.SERVER_WS_URL?.trim() || DEFAULT_SERVER_URL,
       desktopName: process.env.DESKTOP_DEVICE_NAME?.trim() || os.hostname(),
       serverPersistence: "relay_only",
       defaultWorkspacePath: optionalTrimmedString(process.env.CODEX_WORKSPACE_PATH),
       bindings: [
         {
           id: randomUUID(),
-          deviceId,
-          displayName: "Default mobile binding",
+          deviceId: createDeviceToken(),
+          displayName: "Mobile",
           enabled: true,
           createdAt: now,
           updatedAt: now
@@ -64,7 +64,7 @@ export function normalizeConfig(rawConfig: unknown, fallback: DesktopAppConfig):
   const raw = isRecord(rawConfig) ? rawConfig : {};
   const now = new Date().toISOString();
   const desktopName = optionalTrimmedString(raw.desktopName) || fallback.desktopName;
-  const serverUrl = optionalTrimmedString(raw.serverUrl) || fallback.serverUrl;
+  const serverUrl = normalizeServerUrl(raw.serverUrl, fallback.serverUrl);
   const defaultWorkspacePath = optionalTrimmedString(raw.defaultWorkspacePath);
   const bindings = normalizeBindings(raw.bindings, fallback.bindings, now);
 
@@ -112,6 +112,18 @@ function normalizeBindings(
 
 function optionalTrimmedString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function normalizeServerUrl(value: unknown, fallback: string) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  return fallback;
+}
+
+function createDeviceToken() {
+  return `device-token-${randomUUID()}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
