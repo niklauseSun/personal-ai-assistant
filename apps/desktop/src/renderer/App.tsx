@@ -1,10 +1,18 @@
-import type { DesktopAppConfig, DesktopMobileBinding } from "@personal-ai-assistant/shared";
-import { createDesktopPairingPayload } from "@personal-ai-assistant/shared";
+import type {
+  DesktopAppConfig,
+  DesktopBindingConfirmPayload,
+  DesktopMobileBinding,
+  MobileDeviceInfo
+} from "@personal-ai-assistant/shared";
+import { createDesktopPairingPayload, WS_EVENTS, WS_NAMESPACE } from "@personal-ai-assistant/shared";
 import QRCode from "qrcode";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { io } from "socket.io-client";
+import { pingServerHealth, type ServerHealthStatus } from "./server-health";
 
 const BROWSER_CONFIG_STORAGE_KEY = "personal-ai-assistant.desktop-config";
 const DEFAULT_SERVER_URL = "http://localhost:3000";
+type ServerStatus = "checking" | ServerHealthStatus;
 
 const emptyConfig: DesktopAppConfig = {
   serverUrl: DEFAULT_SERVER_URL,
@@ -15,36 +23,42 @@ const emptyConfig: DesktopAppConfig = {
 
 export function App() {
   const isBrowserPreview = typeof window !== "undefined" && !window.desktopShell;
+  const configRef = useRef<DesktopAppConfig>(emptyConfig);
   const [config, setConfig] = useState<DesktopAppConfig>(emptyConfig);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string>();
   const [qrBindingId, setQrBindingId] = useState<string>();
+  const [pendingPairingBinding, setPendingPairingBinding] = useState<DesktopMobileBinding>();
+  const [pendingPairingCode, setPendingPairingCode] = useState<string>();
   const [qrDataUrl, setQrDataUrl] = useState<string>();
   const [qrError, setQrError] = useState<string>();
-  const [serverStatus, setServerStatus] = useState<"checking" | "available" | "unavailable">(
-    "checking"
-  );
+  const [serverStatus, setServerStatus] = useState<ServerStatus>("checking");
+  const [isServerUrlEditing, setIsServerUrlEditing] = useState(false);
+  const [serverUrlDraft, setServerUrlDraft] = useState(DEFAULT_SERVER_URL);
+  const [serverUrlError, setServerUrlError] = useState<string>();
+  const [serverUrlPingStatus, setServerUrlPingStatus] = useState<ServerHealthStatus>();
+  const [isPinging, setIsPinging] = useState(false);
   const configuredServerUrl = config.serverUrl.trim();
+  const serverUrlDraftValue = serverUrlDraft.trim();
   const enabledCount = useMemo(
     () => config.bindings.filter((binding) => binding.enabled).length,
     [config.bindings]
   );
   const needsServerSetup = configuredServerUrl.length === 0 || serverStatus === "unavailable";
-  const connectionModeLabel = needsServerSetup
-    ? configuredServerUrl
-      ? "Server unavailable"
-      : "Server not configured"
-    : `${enabledCount} enabled`;
-  const primaryBinding = useMemo(
-    () => config.bindings[0],
-    [config.bindings]
-  );
+  const connectionModeLabel = !configuredServerUrl
+    ? "Server not configured"
+    : serverStatus === "available"
+      ? `${enabledCount} enabled`
+      : serverStatusLabel(serverStatus);
   const qrBinding = useMemo(
-    () => config.bindings.find((binding) => binding.id === qrBindingId),
-    [config.bindings, qrBindingId]
+    () => pendingPairingBinding ?? config.bindings.find((binding) => binding.id === qrBindingId),
+    [config.bindings, pendingPairingBinding, qrBindingId]
   );
-  const setupBinding = primaryBinding;
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
 
   useEffect(() => {
     let isMounted = true;
@@ -82,30 +96,121 @@ export function App() {
   }, [config, configuredServerUrl, qrBinding]);
 
   useEffect(() => {
+    if (!pendingPairingBinding || !pendingPairingCode || !configuredServerUrl) {
+      return;
+    }
+
+    let isActive = true;
+    const socket = io(namespaceUrl(configuredServerUrl), {
+      autoConnect: false,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      timeout: 10000
+    });
+
+    socket.on("connect", () => {
+      socket.emit(WS_EVENTS.DEVICE_REGISTER, {
+        deviceId: pendingPairingBinding.deviceId,
+        clientType: "desktop",
+        deviceName: configRef.current.desktopName,
+        metadata: {
+          desktopId: pendingPairingBinding.id,
+          pendingPairing: true,
+          serverPersistence: "relay_only"
+        }
+      });
+    });
+
+    socket.on(WS_EVENTS.DESKTOP_BINDING_CONFIRM, (payload: DesktopBindingConfirmPayload) => {
+      if (
+        payload.deviceId !== pendingPairingBinding.deviceId ||
+        payload.desktopId !== pendingPairingBinding.id
+      ) {
+        return;
+      }
+
+      if (payload.pairingCode !== pendingPairingCode) {
+        socket.emit(WS_EVENTS.DESKTOP_BINDING_FAILED, {
+          deviceId: pendingPairingBinding.deviceId,
+          desktopId: pendingPairingBinding.id,
+          reason: "Invalid pairing code",
+          rejectedAt: new Date().toISOString()
+        });
+        setMessage("Mobile entered the wrong pairing code. Ask them to try again.");
+        return;
+      }
+
+      const completedBinding = {
+        ...pendingPairingBinding,
+        displayName:
+          formatMobileDeviceDisplayName(payload.mobileDevice) ||
+          pendingPairingBinding.displayName ||
+          "Mobile",
+        mobileDevice: payload.mobileDevice,
+        enabled: true,
+        updatedAt: payload.confirmedAt
+      };
+      const nextConfig = addDesktopBinding(configRef.current, completedBinding);
+
+      getDesktopShell()
+        .saveConfig(nextConfig)
+        .then((savedConfig) => {
+          if (!isActive) {
+            return;
+          }
+
+          configRef.current = savedConfig;
+          setConfig(savedConfig);
+          socket.emit(WS_EVENTS.DESKTOP_BINDING_CONFIRMED, payload);
+          setPendingPairingBinding(undefined);
+          setPendingPairingCode(undefined);
+          setQrBindingId(undefined);
+          setMessage("Mobile binding completed. Desktop WebSocket bindings were reloaded.");
+        })
+        .catch((error) => {
+          if (isActive) {
+            setMessage(error instanceof Error ? error.message : "Failed to save mobile binding");
+          }
+        });
+    });
+
+    socket.on("connect_error", (error) => {
+      if (isActive) {
+        setMessage(`Binding relay unavailable: ${error.message}`);
+      }
+    });
+
+    socket.connect();
+
+    return () => {
+      isActive = false;
+      socket.disconnect();
+    };
+  }, [configuredServerUrl, pendingPairingBinding, pendingPairingCode]);
+
+  useEffect(() => {
     let isMounted = true;
-    const controller = new AbortController();
 
     if (!configuredServerUrl) {
       setServerStatus("unavailable");
       return () => {
-        controller.abort();
+        isMounted = false;
       };
     }
 
     setServerStatus("checking");
 
-    fetch(`${configuredServerUrl.replace(/\/$/, "")}/health`, {
-      signal: controller.signal
-    })
-      .then((response) => {
+    pingServerHealth(configuredServerUrl)
+      .then((result) => {
         if (!isMounted) {
           return;
         }
 
-        setServerStatus(response.ok ? "available" : "unavailable");
+        setServerStatus(result.status);
       })
       .catch(() => {
-        if (!isMounted || controller.signal.aborted) {
+        if (!isMounted) {
           return;
         }
 
@@ -114,7 +219,6 @@ export function App() {
 
     return () => {
       isMounted = false;
-      controller.abort();
     };
   }, [configuredServerUrl]);
 
@@ -128,12 +232,9 @@ export function App() {
           return;
         }
 
-        const hydratedConfig = ensureAtLeastOneBinding(nextConfig);
-        setConfig(hydratedConfig);
+        setConfig(nextConfig);
+        setServerUrlDraft(nextConfig.serverUrl);
         setMessage(undefined);
-        if (hydratedConfig.bindings[0]) {
-          setQrBindingId(hydratedConfig.bindings[0].id);
-        }
       })
       .catch((error) => {
         if (isMounted) {
@@ -191,34 +292,101 @@ export function App() {
     }
   };
 
-  const createPairingBinding = async () => {
+  const openPairingModal = (binding: DesktopMobileBinding, nextMessage?: string) => {
+    setPendingPairingBinding(binding);
+    setPendingPairingCode(createPairingCode());
+    setQrBindingId(binding.id);
+    setMessage(nextMessage ?? "Scan the QR code from mobile to finish binding.");
+  };
+
+  const createPairingBinding = () => {
     const binding = createBinding({
       displayName: "Mobile"
     });
-    const nextConfig = {
-      ...config,
-      serverPersistence: "relay_only" as const,
-      bindings: [...config.bindings, binding]
-    };
 
-    setConfig(nextConfig);
-    setQrBindingId(binding.id);
-    await persistConfig(nextConfig, "Binding token created. Scan the QR code from mobile.");
+    openPairingModal(binding);
   };
 
-  const saveServerSetup = async () => {
-    const serverUrl = config.serverUrl.trim();
+  const closePairingModal = () => {
+    if (pendingPairingBinding && qrBinding?.id === pendingPairingBinding.id) {
+      setPendingPairingBinding(undefined);
+      setPendingPairingCode(undefined);
+    }
+
+    setQrBindingId(undefined);
+  };
+
+  const beginServerUrlEdit = () => {
+    setServerUrlDraft(config.serverUrl);
+    setServerUrlError(undefined);
+    setServerUrlPingStatus(undefined);
+    setIsServerUrlEditing(true);
+  };
+
+  const cancelServerUrlEdit = () => {
+    setServerUrlDraft(config.serverUrl);
+    setServerUrlError(undefined);
+    setServerUrlPingStatus(undefined);
+    setIsServerUrlEditing(false);
+  };
+
+  const updateServerUrlDraft = (value: string) => {
+    setServerUrlDraft(value);
+    setServerUrlError(undefined);
+    setServerUrlPingStatus(undefined);
+  };
+
+  const pingServerUrlDraft = async () => {
+    const serverUrl = serverUrlDraftValue;
+    setIsPinging(true);
+    setServerUrlError(undefined);
+    setServerUrlPingStatus(undefined);
+
+    try {
+      const result = await pingServerHealth(serverUrl);
+      setServerUrlPingStatus(result.status);
+      if (serverUrl === configuredServerUrl) {
+        setServerStatus(result.status);
+      }
+
+      if (result.status === "unavailable") {
+        setServerUrlError(result.message);
+      }
+
+      setMessage(
+        result.status === "available"
+          ? `Ping succeeded. ${result.message}`
+          : `Ping failed. ${result.message}`
+      );
+      return result.status === "available";
+    } finally {
+      setIsPinging(false);
+    }
+  };
+
+  const saveServerUrlDraft = async () => {
+    const serverUrl = serverUrlDraftValue;
     if (!serverUrl) {
-      setMessage("Enter a server URL to enable mobile relay and QR pairing.");
+      const errorMessage = "Enter a server URL before saving.";
+      setServerUrlError(errorMessage);
+      setMessage(`Ping failed. ${errorMessage}`);
       return;
     }
 
-    const hydratedConfig = ensureAtLeastOneBinding({
+    const canReachServer = await pingServerUrlDraft();
+    if (!canReachServer) {
+      return;
+    }
+
+    const nextConfig = {
       ...config,
       serverUrl
-    });
-    setQrBindingId(hydratedConfig.bindings[0].id);
-    await persistConfig(hydratedConfig, "Server saved. Mobile relay is ready for QR pairing.");
+    };
+    await persistConfig(nextConfig, "Server saved. Mobile relay is ready for QR pairing.");
+    setServerStatus("available");
+    setServerUrlError(undefined);
+    setServerUrlPingStatus(undefined);
+    setIsServerUrlEditing(false);
   };
 
   const removeBinding = (bindingId: string) => {
@@ -247,25 +415,16 @@ export function App() {
     );
   };
 
-  const resetServerUrl = () => {
-    setConfig((current) => ({
-      ...current,
-      serverUrl: DEFAULT_SERVER_URL
-    }));
-    setMessage(`Server URL reset to ${DEFAULT_SERVER_URL}.`);
-  };
-
   const persistConfig = async (nextConfig: DesktopAppConfig, successMessage: string) => {
     setIsSaving(true);
     try {
-      const savedConfig = ensureAtLeastOneBinding(
-        await getDesktopShell().saveConfig({
-          ...nextConfig,
-          serverUrl: nextConfig.serverUrl.trim(),
-          serverPersistence: "relay_only"
-        })
-      );
+      const savedConfig = await getDesktopShell().saveConfig({
+        ...nextConfig,
+        serverUrl: nextConfig.serverUrl.trim(),
+        serverPersistence: "relay_only"
+      });
       setConfig(savedConfig);
+      setServerUrlDraft(savedConfig.serverUrl);
       setMessage(successMessage);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to save desktop config");
@@ -296,33 +455,24 @@ export function App() {
 
           <section className="section setup-section compact-setup" aria-labelledby="setup-title">
             <div className="compact-setup-body">
-              <label className="field">
-                <span>Server URL</span>
-                <input
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  disabled={isLoading}
-                  onChange={(event) => updateConfig("serverUrl", event.target.value)}
-                  placeholder={DEFAULT_SERVER_URL}
-                  value={config.serverUrl}
-                />
-              </label>
+              <ServerUrlControl
+                error={serverUrlError}
+                isEditing={isServerUrlEditing}
+                isLoading={isLoading}
+                isPinging={isPinging}
+                isSaving={isSaving}
+                onCancel={cancelServerUrlEdit}
+                onChange={updateServerUrlDraft}
+                onEdit={beginServerUrlEdit}
+                onPing={() => void pingServerUrlDraft()}
+                onSave={() => void saveServerUrlDraft()}
+                pingStatus={serverUrlPingStatus}
+                serverUrl={configuredServerUrl}
+                value={serverUrlDraft}
+              />
 
-              <div className="button-row">
-                <button
-                  className="button secondary"
-                  disabled={isLoading || isSaving}
-                  onClick={resetServerUrl}
-                >
-                  Reset
-                </button>
-                <button
-                  className="button primary"
-                  disabled={isLoading || isSaving}
-                  onClick={() => void saveServerSetup()}
-                >
-                  {isSaving ? "Saving..." : "Save"}
-                </button>
+              <div aria-live="polite" className={`server-status ${serverStatus}`}>
+                {serverStatusLabel(serverStatus)}
               </div>
 
               <div className="qr-frame large">
@@ -338,7 +488,7 @@ export function App() {
           </section>
 
           <footer className="footer">
-            <div aria-live="polite" className={message?.startsWith("Saved") ? "success" : "error"}>
+            <div aria-live="polite" className={isSuccessMessage(message) ? "success" : "error"}>
               {message}
             </div>
           </footer>
@@ -372,31 +522,33 @@ export function App() {
           <div>
             <h2 id="connection-title">Connection</h2>
             <p className="muted">
-              The desktop starts with localhost by default. You can edit the relay address or reset
-              it back to localhost at any time.
+              The desktop starts with localhost by default. Edit the relay address when this
+              desktop should bind mobile devices through another server.
             </p>
           </div>
-          <div className={`server-status ${serverStatus}`}>
-            {serverStatus === "available"
-              ? "Server reachable"
-              : serverStatus === "checking"
-                ? "Checking server..."
-                : "Server unavailable"}
+          <div aria-live="polite" className={`server-status ${serverStatus}`}>
+            {serverStatusLabel(serverStatus)}
           </div>
         </div>
 
         <div className="form-grid">
-          <label className="field">
-            <span>Server URL</span>
-            <input
-              autoCapitalize="none"
-              autoCorrect="off"
-              disabled={isLoading}
-              onChange={(event) => updateConfig("serverUrl", event.target.value)}
-              placeholder={DEFAULT_SERVER_URL}
-              value={config.serverUrl}
+          <div className="field-wide">
+            <ServerUrlControl
+              error={serverUrlError}
+              isEditing={isServerUrlEditing}
+              isLoading={isLoading}
+              isPinging={isPinging}
+              isSaving={isSaving}
+              onCancel={cancelServerUrlEdit}
+              onChange={updateServerUrlDraft}
+              onEdit={beginServerUrlEdit}
+              onPing={() => void pingServerUrlDraft()}
+              onSave={() => void saveServerUrlDraft()}
+              pingStatus={serverUrlPingStatus}
+              serverUrl={configuredServerUrl}
+              value={serverUrlDraft}
             />
-          </label>
+          </div>
           <label className="field">
             <span>Desktop name</span>
             <input
@@ -408,12 +560,6 @@ export function App() {
               value={config.desktopName}
             />
           </label>
-          <div className="field action-field">
-            <span>Relay address</span>
-            <button className="button secondary" disabled={isLoading || isSaving} onClick={resetServerUrl}>
-              Reset to localhost
-            </button>
-          </div>
           <label className="field field-wide">
             <span>Default workspace path</span>
             <input
@@ -441,7 +587,7 @@ export function App() {
             <button
               className="button primary"
               disabled={isLoading || isSaving || !configuredServerUrl}
-              onClick={() => void createPairingBinding()}
+              onClick={createPairingBinding}
             >
               Bind mobile by QR
             </button>
@@ -498,7 +644,7 @@ export function App() {
                 <button
                   className="button secondary"
                   disabled={isLoading || !configuredServerUrl || !binding.deviceId.trim()}
-                  onClick={() => setQrBindingId(binding.id)}
+                  onClick={() => openPairingModal(binding)}
                 >
                   QR
                 </button>
@@ -516,10 +662,14 @@ export function App() {
       </section>
 
       <footer className="footer">
-        <div aria-live="polite" className={message?.startsWith("Saved") ? "success" : "error"}>
+        <div aria-live="polite" className={isSuccessMessage(message) ? "success" : "error"}>
           {message}
         </div>
-        <button className="button primary" disabled={isLoading || isSaving} onClick={saveConfig}>
+        <button
+          className="button primary"
+          disabled={isLoading || isSaving || isServerUrlEditing}
+          onClick={saveConfig}
+        >
           {isSaving ? "Saving..." : "Save desktop settings"}
         </button>
       </footer>
@@ -541,7 +691,7 @@ export function App() {
                   {qrBinding.displayName || "Mobile"} · {config.desktopName}
                 </p>
               </div>
-              <button className="button secondary" onClick={() => setQrBindingId(undefined)}>
+              <button className="button secondary" onClick={closePairingModal}>
                 Close
               </button>
             </div>
@@ -554,28 +704,121 @@ export function App() {
                 )}
               </div>
               <div className="pairing-detail">
-                <label className="field">
+                {pendingPairingCode ? (
+                  <div className="pairing-code-panel">
+                    <span>Pairing code</span>
+                    <strong>{pendingPairingCode}</strong>
+                  </div>
+                ) : null}
+                <div className="field">
                   <span>Server URL</span>
-                  <input readOnly value={configuredServerUrl} />
-                </label>
-                <label className="field">
-                  <span>Desktop ID</span>
-                  <input readOnly value={qrBinding.id} />
-                </label>
-                <label className="field">
-                  <span>Device token</span>
-                  <input readOnly value={qrBinding.deviceId} />
-                </label>
-                <label className="field">
-                  <span>Manual payload</span>
-                  <textarea readOnly value={JSON.stringify(createPairingPayload(config, qrBinding))} />
-                </label>
+                  <div className="server-url-text" title={configuredServerUrl}>
+                    {configuredServerUrl}
+                  </div>
+                </div>
               </div>
             </div>
           </section>
         </div>
       ) : null}
     </main>
+  );
+}
+
+interface ServerUrlControlProps {
+  error?: string;
+  isEditing: boolean;
+  isLoading: boolean;
+  isPinging: boolean;
+  isSaving: boolean;
+  onCancel: () => void;
+  onChange: (value: string) => void;
+  onEdit: () => void;
+  onPing: () => void;
+  onSave: () => void;
+  pingStatus?: ServerHealthStatus;
+  serverUrl: string;
+  value: string;
+}
+
+function ServerUrlControl({
+  error,
+  isEditing,
+  isLoading,
+  isPinging,
+  isSaving,
+  onCancel,
+  onChange,
+  onEdit,
+  onPing,
+  onSave,
+  pingStatus,
+  serverUrl,
+  value
+}: ServerUrlControlProps) {
+  const hasChanges = value.trim() !== serverUrl.trim();
+  const displayUrl = serverUrl || "No server URL configured";
+  const pingButtonClass = pingStatus === "available" ? "button success-button" : "button secondary";
+
+  return (
+    <div className={`server-url-control${error ? " error" : ""}`}>
+      <div className="server-url-header">
+        <span>Server URL</span>
+      </div>
+
+      {!isEditing ? (
+        <div className="server-url-view-row">
+          <div className="server-url-text" title={displayUrl}>
+            {displayUrl}
+          </div>
+          <button className="button secondary compact-button" disabled={isLoading} onClick={onEdit}>
+            Edit
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="server-url-edit-row">
+            <input
+              aria-invalid={Boolean(error)}
+              autoCapitalize="none"
+              autoCorrect="off"
+              disabled={isLoading || isSaving}
+              onChange={(event) => onChange(event.target.value)}
+              placeholder={DEFAULT_SERVER_URL}
+              value={value}
+            />
+            <button
+              className="button secondary"
+              disabled={isLoading || isSaving || isPinging}
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+            <button
+              className={pingButtonClass}
+              disabled={isLoading || isSaving || isPinging || !value.trim()}
+              onClick={onPing}
+            >
+              {isPinging ? "Pinging..." : "Ping"}
+            </button>
+            {hasChanges ? (
+              <button
+                className="button primary"
+                disabled={isLoading || isSaving || isPinging}
+                onClick={onSave}
+              >
+                {isSaving ? "Saving..." : "Save"}
+              </button>
+            ) : null}
+          </div>
+          {error ? (
+            <p aria-live="polite" className="field-error">
+              {error}
+            </p>
+          ) : null}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -591,14 +834,19 @@ function createBinding(overrides: Partial<DesktopMobileBinding> = {}): DesktopMo
   };
 }
 
-function ensureAtLeastOneBinding(config: DesktopAppConfig): DesktopAppConfig {
-  if (config.bindings.length > 0) {
-    return config;
-  }
-
+function addDesktopBinding(
+  config: DesktopAppConfig,
+  binding: DesktopMobileBinding
+): DesktopAppConfig {
   return {
     ...config,
-    bindings: [createBinding({ displayName: "Mobile" })]
+    bindings: [
+      binding,
+      ...config.bindings.filter(
+        (currentBinding) =>
+          currentBinding.id !== binding.id && currentBinding.deviceId !== binding.deviceId
+      )
+    ]
   };
 }
 
@@ -614,6 +862,29 @@ function createDeviceToken() {
   return `device-token-${createBindingId()}`;
 }
 
+function createPairingCode() {
+  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+    const value = new Uint32Array(1);
+    crypto.getRandomValues(value);
+    return String((value[0] % 900_000) + 100_000);
+  }
+
+  return String(Math.floor(100_000 + Math.random() * 900_000));
+}
+
+function formatMobileDeviceDisplayName(mobileDevice: MobileDeviceInfo) {
+  const labels = [mobileDevice.deviceName, mobileDevice.modelName]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+  const uniqueLabels = Array.from(new Set(labels));
+
+  if (uniqueLabels.length > 0) {
+    return uniqueLabels.join(" · ");
+  }
+
+  return undefined;
+}
+
 function createPairingPayload(config: DesktopAppConfig, binding: DesktopMobileBinding) {
   return createDesktopPairingPayload({
     serverUrl: config.serverUrl.trim(),
@@ -622,6 +893,33 @@ function createPairingPayload(config: DesktopAppConfig, binding: DesktopMobileBi
     desktopName: config.desktopName,
     createdAt: binding.createdAt
   });
+}
+
+function namespaceUrl(serverUrl: string) {
+  const normalized = serverUrl.trim().replace(/\/$/, "");
+  return normalized.endsWith(WS_NAMESPACE) ? normalized : `${normalized}${WS_NAMESPACE}`;
+}
+
+function serverStatusLabel(status: ServerStatus) {
+  if (status === "available") {
+    return "Server reachable";
+  }
+
+  if (status === "checking") {
+    return "Checking server...";
+  }
+
+  return "Server unavailable";
+}
+
+function isSuccessMessage(message: string | undefined) {
+  return Boolean(
+    message?.startsWith("Saved") ||
+      message?.startsWith("Server saved") ||
+      message?.startsWith("Ping succeeded") ||
+      message?.startsWith("Scan the QR code") ||
+      message?.startsWith("Mobile binding completed")
+  );
 }
 
 function getDesktopShell() {
@@ -641,25 +939,23 @@ const browserDesktopShell = {
 
     const raw = window.localStorage.getItem(BROWSER_CONFIG_STORAGE_KEY);
     if (!raw) {
-      const initialConfig = ensureAtLeastOneBinding(emptyConfig);
-      window.localStorage.setItem(BROWSER_CONFIG_STORAGE_KEY, JSON.stringify(initialConfig));
-      return initialConfig;
+      window.localStorage.setItem(BROWSER_CONFIG_STORAGE_KEY, JSON.stringify(emptyConfig));
+      return emptyConfig;
     }
 
     try {
       const parsed = JSON.parse(raw) as DesktopAppConfig;
-      return ensureAtLeastOneBinding(parsed);
+      return parsed;
     } catch {
-      const initialConfig = ensureAtLeastOneBinding(emptyConfig);
-      window.localStorage.setItem(BROWSER_CONFIG_STORAGE_KEY, JSON.stringify(initialConfig));
-      return initialConfig;
+      window.localStorage.setItem(BROWSER_CONFIG_STORAGE_KEY, JSON.stringify(emptyConfig));
+      return emptyConfig;
     }
   },
   async saveConfig(config: DesktopAppConfig) {
-    const normalized = ensureAtLeastOneBinding({
+    const normalized: DesktopAppConfig = {
       ...config,
       serverPersistence: "relay_only"
-    });
+    };
 
     if (typeof window !== "undefined") {
       window.localStorage.setItem(BROWSER_CONFIG_STORAGE_KEY, JSON.stringify(normalized));

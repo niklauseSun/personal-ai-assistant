@@ -1,3 +1,5 @@
+import type { MobileDeviceInfo } from "./models";
+
 export type ServerPersistenceMode = "persist" | "relay_only";
 
 export const DESKTOP_PAIRING_PAYLOAD_TYPE = "personal-ai-assistant.desktop-binding" as const;
@@ -7,6 +9,7 @@ export interface DesktopMobileBinding {
   id: string;
   deviceId: string;
   displayName?: string;
+  mobileDevice?: MobileDeviceInfo;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;

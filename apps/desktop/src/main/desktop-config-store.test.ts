@@ -26,6 +26,14 @@ describe("DesktopConfigStore", () => {
             id: "binding-1",
             deviceId: " mobile-1 ",
             displayName: " Phone ",
+            mobileDevice: {
+              deviceName: " Alice's iPhone ",
+              modelName: " iPhone 15 Pro ",
+              manufacturer: " Apple ",
+              osName: " ios ",
+              osVersion: " 17.5 ",
+              platform: " ios "
+            },
             enabled: true,
             createdAt: "2026-05-15T00:00:00.000Z"
           },
@@ -50,6 +58,14 @@ describe("DesktopConfigStore", () => {
     assert.equal(config.bindings.length, 1);
     assert.equal(config.bindings[0].deviceId, "mobile-1");
     assert.equal(config.bindings[0].displayName, "Phone");
+    assert.deepEqual(config.bindings[0].mobileDevice, {
+      deviceName: "Alice's iPhone",
+      modelName: "iPhone 15 Pro",
+      manufacturer: "Apple",
+      osName: "ios",
+      osVersion: "17.5",
+      platform: "ios"
+    });
   });
 
   it("persists desktop config as JSON", async () => {

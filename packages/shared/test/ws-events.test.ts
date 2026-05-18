@@ -29,6 +29,9 @@ type RequiredEventNames =
   | "device.register"
   | "device.heartbeat"
   | "device.online"
+  | "desktop.binding.confirm"
+  | "desktop.binding.confirmed"
+  | "desktop.binding.failed"
   | "task.create"
   | "task.created"
   | "task.started"
@@ -102,6 +105,42 @@ const onlinePayload: ServerToClientEventPayloads[typeof WS_EVENTS.DEVICE_ONLINE]
   session,
   serverTime: createdAt
 };
+
+const desktopBindingConfirmPayload: ClientToServerEventPayloads[typeof WS_EVENTS.DESKTOP_BINDING_CONFIRM] =
+  {
+    deviceId: "mobile-1",
+    desktopId: "desktop-1",
+    desktopName: "MacBook",
+    pairingCode: "123456",
+    mobileDevice: {
+      deviceName: "Alex's iPhone",
+      modelName: "iPhone 15 Pro",
+      osName: "ios",
+      osVersion: "17.5",
+      platform: "ios"
+    },
+    confirmedAt: createdAt
+  };
+
+const desktopBindingConfirmedPayload: ServerToClientEventPayloads[typeof WS_EVENTS.DESKTOP_BINDING_CONFIRMED] =
+  desktopBindingConfirmPayload;
+
+const desktopBindingRelayPayload: ServerToClientEventPayloads[typeof WS_EVENTS.DESKTOP_BINDING_CONFIRM] =
+  desktopBindingConfirmPayload;
+
+const desktopBindingConfirmedFromDesktopPayload: ClientToServerEventPayloads[typeof WS_EVENTS.DESKTOP_BINDING_CONFIRMED] =
+  desktopBindingConfirmPayload;
+
+const desktopBindingFailedPayload: ServerToClientEventPayloads[typeof WS_EVENTS.DESKTOP_BINDING_FAILED] =
+  {
+    deviceId: "mobile-1",
+    desktopId: "desktop-1",
+    reason: "Invalid pairing code",
+    rejectedAt: createdAt
+  };
+
+const desktopBindingFailedFromDesktopPayload: ClientToServerEventPayloads[typeof WS_EVENTS.DESKTOP_BINDING_FAILED] =
+  desktopBindingFailedPayload;
 
 const createPayload: ClientToServerEventPayloads[typeof WS_EVENTS.TASK_CREATE] = {
   deviceId: "mobile-1",
@@ -221,6 +260,12 @@ void requiredEventsArePresent;
 void registerPayload;
 void heartbeatPayload;
 void onlinePayload;
+void desktopBindingConfirmPayload;
+void desktopBindingRelayPayload;
+void desktopBindingConfirmedPayload;
+void desktopBindingConfirmedFromDesktopPayload;
+void desktopBindingFailedPayload;
+void desktopBindingFailedFromDesktopPayload;
 void createPayload;
 void createdPayload;
 void startedPayload;

@@ -256,4 +256,180 @@ describe("AgentGateway relay-only mode", () => {
       )
     );
   });
+
+  it("relays desktop binding confirmations only when the pending desktop is online", async () => {
+    const desktop = new FakeSocket("desktop-pairing-socket");
+    const mobile = new FakeSocket("mobile-pairing-socket");
+
+    await gateway.handleDeviceRegister(
+      {
+        deviceId: "binding-pairing",
+        deviceName: "MacBook / Mobile",
+        clientType: "desktop",
+        metadata: {
+          desktopId: "desktop-pairing",
+          serverPersistence: "relay_only",
+          pendingPairing: true
+        }
+      },
+      desktop as unknown as Socket
+    );
+    await gateway.handleDeviceRegister(
+      {
+        deviceId: "binding-pairing",
+        clientType: "mobile"
+      },
+      mobile as unknown as Socket
+    );
+
+    const confirmed = await gateway.handleDesktopBindingConfirm(
+      {
+        deviceId: "binding-pairing",
+        desktopId: "desktop-pairing",
+        desktopName: "MacBook",
+        pairingCode: "123456",
+        mobileDevice: {
+          deviceName: "Alice's iPhone",
+          modelName: "iPhone 15 Pro",
+          osName: "ios",
+          osVersion: "17.5",
+          platform: "ios"
+        },
+        confirmedAt: "2026-05-18T00:00:00.000Z"
+      },
+      mobile as unknown as Socket
+    );
+
+    assert.equal(confirmed.desktopId, "desktop-pairing");
+    assert.ok(
+      server.emissions.some(
+        (emission) =>
+          emission.room ===
+            DeviceConnectionService.desktopTargetRoomName("binding-pairing", "desktop-pairing") &&
+          emission.eventName === WS_EVENTS.DESKTOP_BINDING_CONFIRM
+      )
+    );
+    assert.ok(
+      !server.emissions.some(
+        (emission) =>
+          emission.room === DeviceConnectionService.roomName("binding-pairing", "mobile") &&
+          emission.eventName === WS_EVENTS.DESKTOP_BINDING_CONFIRMED
+      )
+    );
+
+    await gateway.handleDesktopBindingConfirmed(
+      {
+        deviceId: "binding-pairing",
+        desktopId: "desktop-pairing",
+        desktopName: "MacBook",
+        pairingCode: "123456",
+        mobileDevice: {
+          deviceName: "Alice's iPhone",
+          modelName: "iPhone 15 Pro",
+          osName: "ios",
+          osVersion: "17.5",
+          platform: "ios"
+        },
+        confirmedAt: "2026-05-18T00:00:00.000Z"
+      },
+      desktop as unknown as Socket
+    );
+    assert.ok(
+      server.emissions.some(
+        (emission) =>
+          emission.room === DeviceConnectionService.roomName("binding-pairing", "mobile") &&
+          emission.eventName === WS_EVENTS.DESKTOP_BINDING_CONFIRMED
+      )
+    );
+  });
+
+  it("reports binding confirmation failures when the pairing modal has closed", async () => {
+    const mobile = new FakeSocket("mobile-missing-pairing-target");
+
+    await gateway.handleDeviceRegister(
+      {
+        deviceId: "binding-pairing-missing",
+        clientType: "mobile"
+      },
+      mobile as unknown as Socket
+    );
+
+    await gateway.handleDesktopBindingConfirm(
+      {
+        deviceId: "binding-pairing-missing",
+        desktopId: "desktop-missing",
+        desktopName: "MacBook",
+        pairingCode: "123456",
+        mobileDevice: {
+          deviceName: "Alice's iPhone",
+          modelName: "iPhone 15 Pro",
+          platform: "ios"
+        },
+        confirmedAt: "2026-05-18T00:00:00.000Z"
+      },
+      mobile as unknown as Socket
+    );
+
+    assert.ok(
+      server.emissions.some(
+        (emission) =>
+          emission.room === DeviceConnectionService.roomName("binding-pairing-missing", "mobile") &&
+          emission.eventName === WS_EVENTS.TASK_RELAY_FAILED &&
+          (emission.payload as { failedEventName: string }).failedEventName ===
+            WS_EVENTS.DESKTOP_BINDING_CONFIRM
+      )
+    );
+    assert.ok(
+      !server.emissions.some(
+        (emission) =>
+          emission.room === DeviceConnectionService.roomName("binding-pairing-missing", "mobile") &&
+          emission.eventName === WS_EVENTS.DESKTOP_BINDING_CONFIRMED
+      )
+    );
+  });
+
+  it("relays desktop binding failures from desktop back to mobile", async () => {
+    const desktop = new FakeSocket("desktop-failed-pairing-socket");
+    const mobile = new FakeSocket("mobile-failed-pairing-socket");
+
+    await gateway.handleDeviceRegister(
+      {
+        deviceId: "binding-pairing-failed",
+        deviceName: "MacBook / Mobile",
+        clientType: "desktop",
+        metadata: {
+          desktopId: "desktop-pairing-failed",
+          serverPersistence: "relay_only",
+          pendingPairing: true
+        }
+      },
+      desktop as unknown as Socket
+    );
+    await gateway.handleDeviceRegister(
+      {
+        deviceId: "binding-pairing-failed",
+        clientType: "mobile"
+      },
+      mobile as unknown as Socket
+    );
+
+    const failed = await gateway.handleDesktopBindingFailed(
+      {
+        deviceId: "binding-pairing-failed",
+        desktopId: "desktop-pairing-failed",
+        reason: "Invalid pairing code",
+        rejectedAt: "2026-05-18T00:00:00.000Z"
+      },
+      desktop as unknown as Socket
+    );
+
+    assert.equal(failed.reason, "Invalid pairing code");
+    assert.ok(
+      server.emissions.some(
+        (emission) =>
+          emission.room === DeviceConnectionService.roomName("binding-pairing-failed", "mobile") &&
+          emission.eventName === WS_EVENTS.DESKTOP_BINDING_FAILED
+      )
+    );
+  });
 });

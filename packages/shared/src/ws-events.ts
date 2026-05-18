@@ -6,6 +6,7 @@ import type {
   ClientType,
   DeviceSession,
   Id,
+  MobileDeviceInfo,
   OutputChunk,
   SharedError
 } from "./models";
@@ -16,6 +17,9 @@ export const WS_EVENTS = {
   DEVICE_REGISTER: "device.register",
   DEVICE_HEARTBEAT: "device.heartbeat",
   DEVICE_ONLINE: "device.online",
+  DESKTOP_BINDING_CONFIRM: "desktop.binding.confirm",
+  DESKTOP_BINDING_CONFIRMED: "desktop.binding.confirmed",
+  DESKTOP_BINDING_FAILED: "desktop.binding.failed",
   TASK_CREATE: "task.create",
   TASK_CREATED: "task.created",
   TASK_STARTED: "task.started",
@@ -33,6 +37,9 @@ export const WS_EVENT_NAMES = [
   WS_EVENTS.DEVICE_REGISTER,
   WS_EVENTS.DEVICE_HEARTBEAT,
   WS_EVENTS.DEVICE_ONLINE,
+  WS_EVENTS.DESKTOP_BINDING_CONFIRM,
+  WS_EVENTS.DESKTOP_BINDING_CONFIRMED,
+  WS_EVENTS.DESKTOP_BINDING_FAILED,
   WS_EVENTS.TASK_CREATE,
   WS_EVENTS.TASK_CREATED,
   WS_EVENTS.TASK_STARTED,
@@ -67,6 +74,22 @@ export interface DeviceHeartbeatPayload {
   desktopId?: Id;
   sentAt?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface DesktopBindingConfirmPayload {
+  deviceId: Id;
+  desktopId: Id;
+  desktopName: string;
+  pairingCode: string;
+  mobileDevice: MobileDeviceInfo;
+  confirmedAt: string;
+}
+
+export interface DesktopBindingFailedPayload {
+  deviceId: Id;
+  desktopId: Id;
+  reason: string;
+  rejectedAt: string;
 }
 
 export interface TaskCreatePayload {
@@ -146,6 +169,9 @@ export interface TaskRelayFailedPayload {
 export interface ClientToServerEventPayloads {
   [WS_EVENTS.DEVICE_REGISTER]: DeviceRegisterPayload;
   [WS_EVENTS.DEVICE_HEARTBEAT]: DeviceHeartbeatPayload;
+  [WS_EVENTS.DESKTOP_BINDING_CONFIRM]: DesktopBindingConfirmPayload;
+  [WS_EVENTS.DESKTOP_BINDING_CONFIRMED]: DesktopBindingConfirmPayload;
+  [WS_EVENTS.DESKTOP_BINDING_FAILED]: DesktopBindingFailedPayload;
   [WS_EVENTS.TASK_CREATE]: TaskCreatePayload;
   [WS_EVENTS.TASK_STARTED]: TaskStartedPayload;
   [WS_EVENTS.TASK_OUTPUT]: TaskOutputPayload;
@@ -158,6 +184,9 @@ export interface ClientToServerEventPayloads {
 
 export interface ServerToClientEventPayloads {
   [WS_EVENTS.DEVICE_ONLINE]: DeviceOnlinePayload;
+  [WS_EVENTS.DESKTOP_BINDING_CONFIRM]: DesktopBindingConfirmPayload;
+  [WS_EVENTS.DESKTOP_BINDING_CONFIRMED]: DesktopBindingConfirmPayload;
+  [WS_EVENTS.DESKTOP_BINDING_FAILED]: DesktopBindingFailedPayload;
   [WS_EVENTS.TASK_CREATED]: TaskCreatedPayload;
   [WS_EVENTS.TASK_STARTED]: TaskStartedPayload;
   [WS_EVENTS.TASK_OUTPUT]: TaskOutputPayload;

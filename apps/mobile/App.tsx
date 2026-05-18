@@ -2,13 +2,16 @@ import type {
   AgentTask,
   AgentTaskStatus,
   DeviceSession,
-  MobileBoundDesktop
+  MobileBoundDesktop,
+  MobileDeviceInfo
 } from "@personal-ai-assistant/shared";
+import { WS_EVENTS } from "@personal-ai-assistant/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Keyboard,
   KeyboardAvoidingView,
+  NativeModules,
   PanResponder,
   Platform,
   Pressable,
@@ -112,8 +115,138 @@ function parseOptionalTime(value: string) {
   return Number.isNaN(time) ? undefined : time;
 }
 
+function getMobileDeviceInfo(): MobileDeviceInfo {
+  const nativeConstants = toNativeRecord(NativeModules.PlatformConstants);
+  const platformConstants = toNativeRecord(
+    (Platform as unknown as { constants?: unknown }).constants
+  );
+
+  return {
+    deviceName: firstNativeString(
+      nativeConstants.DeviceName,
+      nativeConstants.deviceName,
+      platformConstants.DeviceName,
+      platformConstants.deviceName
+    ),
+    modelName: firstNativeString(
+      nativeConstants.Model,
+      nativeConstants.model,
+      nativeConstants.deviceModel,
+      platformConstants.Model,
+      platformConstants.model,
+      platformConstants.deviceModel
+    ),
+    manufacturer: firstNativeString(
+      nativeConstants.Manufacturer,
+      nativeConstants.manufacturer,
+      nativeConstants.Brand,
+      nativeConstants.brand,
+      platformConstants.Manufacturer,
+      platformConstants.manufacturer,
+      platformConstants.Brand,
+      platformConstants.brand
+    ),
+    osName: Platform.OS,
+    osVersion: String(Platform.Version),
+    platform: Platform.OS
+  };
+}
+
+function toNativeRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function firstNativeString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return undefined;
+}
+
+interface PairingCodeScreenProps {
+  code: string;
+  connectionStatus: string;
+  desktop?: MobileBoundDesktop;
+  error?: string;
+  isSubmitting: boolean;
+  onBack: () => void;
+  onCodeChange: (value: string) => void;
+  onSubmit: () => void;
+}
+
+function PairingCodeScreen({
+  code,
+  connectionStatus,
+  desktop,
+  error,
+  isSubmitting,
+  onBack,
+  onCodeChange,
+  onSubmit
+}: PairingCodeScreenProps) {
+  const canSubmit = code.length === 6 && connectionStatus === "connected" && !isSubmitting;
+
+  return (
+    <View style={styles.confirmBindingPanel}>
+      <View style={styles.connectionHeader}>
+        <View>
+          <Text style={sharedStyles.label}>Bind</Text>
+          <Text style={sharedStyles.title}>Confirm code</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onBack}
+          style={[sharedStyles.button, sharedStyles.buttonGhost]}
+        >
+          <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>Back</Text>
+        </Pressable>
+      </View>
+
+      <View style={sharedStyles.card}>
+        <Text style={styles.confirmDesktopName}>{desktop?.desktopName ?? "Desktop"}</Text>
+        <Text style={sharedStyles.muted}>{desktop?.serverUrl ?? "No server URL"}</Text>
+        <Text style={styles.deviceText}>Relay status: {connectionStatus}</Text>
+      </View>
+
+      <View style={styles.codeBlock}>
+        <Text style={sharedStyles.label}>Pairing code</Text>
+        <TextInput
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="number-pad"
+          maxLength={6}
+          onChangeText={onCodeChange}
+          placeholder="000000"
+          style={[sharedStyles.input, styles.codeInput, error ? styles.codeInputError : null]}
+          value={code}
+        />
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        disabled={!canSubmit}
+        onPress={onSubmit}
+        style={[sharedStyles.button, !canSubmit ? styles.disabledButton : null]}
+      >
+        <Text style={sharedStyles.buttonText}>
+          {isSubmitting ? "Confirming..." : "Confirm binding"}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
 export default function App() {
   const clientRef = useRef(new MobileWebSocketClient());
+  const boundDesktopsRef = useRef<MobileBoundDesktop[]>([]);
+  const pendingScannedDesktopRef = useRef<MobileBoundDesktop | undefined>(undefined);
+  const hasSentBindingConfirmRef = useRef(false);
   const {
     serverUrl,
     deviceId,
@@ -142,6 +275,14 @@ export default function App() {
   const [activeBoundDesktopId, setActiveBoundDesktopId] = useState<string>();
   const [isDesktopDrawerOpen, setDesktopDrawerOpen] = useState(false);
   const [isLoadingDesktopBindings, setDesktopBindingsLoading] = useState(true);
+  const [pendingScannedDesktop, setPendingScannedDesktop] = useState<MobileBoundDesktop>();
+  const [pairingCodeInput, setPairingCodeInput] = useState("");
+  const [pairingCodeError, setPairingCodeError] = useState<string>();
+  const [isBindingConfirming, setBindingConfirming] = useState(false);
+
+  useEffect(() => {
+    boundDesktopsRef.current = boundDesktops;
+  }, [boundDesktops]);
 
   useEffect(() => {
     return () => {
@@ -303,6 +444,11 @@ export default function App() {
     ? ["created", "running", "started", "waiting_approval"].includes(selectedTask.status)
     : false;
 
+  const updatePendingScannedDesktop = (desktop: MobileBoundDesktop | undefined) => {
+    pendingScannedDesktopRef.current = desktop;
+    setPendingScannedDesktop(desktop);
+  };
+
   const applyLocalHistoryFilters = () => {
     useTaskStore.getState().setHistoryLoading(false);
     useTaskStore.getState().setError(undefined);
@@ -378,6 +524,16 @@ export default function App() {
             return;
           }
 
+          const pendingDesktop = pendingScannedDesktopRef.current;
+          if (
+            pendingDesktop &&
+            payload.session.clientType === "mobile" &&
+            payload.session.deviceId === pendingDesktop.deviceId
+          ) {
+            useTaskStore.getState().setError(undefined);
+            return;
+          }
+
           applyLocalHistoryFilters();
         },
         onError: (message) => useTaskStore.getState().setError(message),
@@ -385,7 +541,71 @@ export default function App() {
         onOutput: (chunk) => useTaskStore.getState().appendOutput(chunk),
         onApproval: (approval) => useTaskStore.getState().upsertApproval(approval),
         onApprovalResult: (result) => useTaskStore.getState().applyApprovalResult(result),
+        onDesktopBindingConfirmed: (payload) => {
+          const pendingDesktop = pendingScannedDesktopRef.current;
+          if (
+            !pendingDesktop ||
+            payload.deviceId !== pendingDesktop.deviceId ||
+            payload.desktopId !== pendingDesktop.desktopId
+          ) {
+            return;
+          }
+
+          const nextDesktop = {
+            ...pendingDesktop,
+            updatedAt: payload.confirmedAt,
+            lastUsedAt: payload.confirmedAt
+          };
+          const nextDesktops = upsertBoundDesktop(boundDesktopsRef.current, nextDesktop);
+
+          updatePendingScannedDesktop(undefined);
+          hasSentBindingConfirmRef.current = false;
+          setBindingConfirming(false);
+          setPairingCodeInput("");
+          setPairingCodeError(undefined);
+          boundDesktopsRef.current = nextDesktops;
+          setBoundDesktops(nextDesktops);
+          setActiveBoundDesktopId(nextDesktop.id);
+          setDesktopDrawerOpen(false);
+          useTaskStore.getState().setScreen("tasks");
+          useTaskStore.getState().setError(undefined);
+          void saveDesktopBindingState({
+            bindings: nextDesktops,
+            lastUsedDesktopId: nextDesktop.id
+          }).catch((error) =>
+            useTaskStore
+              .getState()
+              .setError(error instanceof Error ? error.message : "Failed to save desktop binding")
+          );
+        },
+        onDesktopBindingFailed: (failure) => {
+          const pendingDesktop = pendingScannedDesktopRef.current;
+          if (
+            !pendingDesktop ||
+            failure.deviceId !== pendingDesktop.deviceId ||
+            failure.desktopId !== pendingDesktop.desktopId
+          ) {
+            return;
+          }
+
+          hasSentBindingConfirmRef.current = false;
+          setBindingConfirming(false);
+          setPairingCodeError(failure.reason);
+          useTaskStore.getState().setError(failure.reason);
+        },
         onRelayFailed: (failure) => {
+          if (
+            failure.failedEventName === WS_EVENTS.DESKTOP_BINDING_CONFIRM ||
+            failure.failedEventName === WS_EVENTS.DESKTOP_BINDING_CONFIRMED
+          ) {
+            updatePendingScannedDesktop(undefined);
+            hasSentBindingConfirmRef.current = false;
+            setBindingConfirming(false);
+            setPairingCodeInput("");
+            setPairingCodeError(undefined);
+            useTaskStore.getState().setScreen("scanBinding");
+          }
+
           useTaskStore.getState().applyRelayFailure(failure);
           useTaskStore.getState().setError(failure.error.message);
         }
@@ -433,21 +653,15 @@ export default function App() {
     try {
       const payload = parsePairingPayload(rawValue);
       const desktop = boundDesktopFromPairingPayload(payload);
-      const nextDesktops = upsertBoundDesktop(boundDesktops, desktop);
 
-      setBoundDesktops(nextDesktops);
-      setActiveBoundDesktopId(desktop.id);
+      updatePendingScannedDesktop(desktop);
+      hasSentBindingConfirmRef.current = false;
+      setBindingConfirming(false);
+      setPairingCodeInput("");
+      setPairingCodeError(undefined);
       setDesktopDrawerOpen(false);
-      useTaskStore.getState().setScreen("tasks");
+      useTaskStore.getState().setScreen("confirmBinding");
       useTaskStore.getState().setError(undefined);
-      void saveDesktopBindingState({
-        bindings: nextDesktops,
-        lastUsedDesktopId: desktop.id
-      }).catch((error) =>
-        useTaskStore
-          .getState()
-          .setError(error instanceof Error ? error.message : "Failed to save desktop binding")
-      );
       connectTo(desktop.serverUrl, desktop.deviceId);
     } catch (error) {
       useTaskStore
@@ -502,6 +716,49 @@ export default function App() {
       useTaskStore
         .getState()
         .setError(error instanceof Error ? error.message : "Failed to delete desktop binding");
+    }
+  };
+
+  const submitPairingCode = () => {
+    const pendingDesktop = pendingScannedDesktopRef.current;
+    const pairingCode = pairingCodeInput.trim();
+
+    if (!pendingDesktop) {
+      setPairingCodeError("Scan the desktop QR code again.");
+      return;
+    }
+
+    if (!/^\d{6}$/.test(pairingCode)) {
+      setPairingCodeError("Enter the 6-digit pairing code.");
+      return;
+    }
+
+    if (connectionStatus !== "connected") {
+      setPairingCodeError("Mobile is still connecting to the desktop relay.");
+      return;
+    }
+
+    if (hasSentBindingConfirmRef.current) {
+      return;
+    }
+
+    try {
+      hasSentBindingConfirmRef.current = true;
+      setBindingConfirming(true);
+      setPairingCodeError(undefined);
+      clientRef.current.confirmDesktopBinding({
+        deviceId: pendingDesktop.deviceId,
+        desktopId: pendingDesktop.desktopId,
+        desktopName: pendingDesktop.desktopName,
+        pairingCode,
+        mobileDevice: getMobileDeviceInfo(),
+        confirmedAt: new Date().toISOString()
+      });
+      useTaskStore.getState().setError("Waiting for desktop to confirm binding.");
+    } catch (error) {
+      hasSentBindingConfirmRef.current = false;
+      setBindingConfirming(false);
+      setPairingCodeError(error instanceof Error ? error.message : "Failed to send pairing code");
     }
   };
 
@@ -623,6 +880,31 @@ export default function App() {
         <ScanBindingScreen
           onBack={() => useTaskStore.getState().setScreen("tasks")}
           onScanned={handleBindingScanned}
+        />
+      );
+    }
+
+    if (screen === "confirmBinding") {
+      return (
+        <PairingCodeScreen
+          code={pairingCodeInput}
+          connectionStatus={connectionStatus}
+          desktop={pendingScannedDesktop}
+          error={pairingCodeError}
+          isSubmitting={isBindingConfirming}
+          onBack={() => {
+            updatePendingScannedDesktop(undefined);
+            hasSentBindingConfirmRef.current = false;
+            setBindingConfirming(false);
+            setPairingCodeInput("");
+            setPairingCodeError(undefined);
+            useTaskStore.getState().setScreen("scanBinding");
+          }}
+          onCodeChange={(value) => {
+            setPairingCodeInput(value.replace(/\D/g, "").slice(0, 6));
+            setPairingCodeError(undefined);
+          }}
+          onSubmit={submitPairingCode}
         />
       );
     }
@@ -841,9 +1123,33 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textAlign: "right"
   },
+  codeBlock: {
+    gap: 8
+  },
+  codeInput: {
+    fontSize: 28,
+    fontWeight: "700",
+    letterSpacing: 0,
+    textAlign: "center"
+  },
+  codeInputError: {
+    borderColor: colors.danger
+  },
+  confirmBindingPanel: {
+    gap: 16
+  },
+  confirmDesktopName: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 6
+  },
   deviceText: {
     color: colors.muted,
     fontSize: 13
+  },
+  disabledButton: {
+    opacity: 0.55
   },
   emptyBindingPanel: {
     gap: 10,

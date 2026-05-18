@@ -18,7 +18,7 @@ import {
   type TaskHistorySnapshot
 } from "./task-history-db";
 
-export type MobileScreen = "tasks" | "create" | "detail" | "scanBinding";
+export type MobileScreen = "tasks" | "create" | "detail" | "scanBinding" | "confirmBinding";
 export type ConnectionStatus = "idle" | "connecting" | "connected" | "disconnected";
 
 interface TaskState {

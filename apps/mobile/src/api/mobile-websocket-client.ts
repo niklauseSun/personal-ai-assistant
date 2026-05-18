@@ -2,6 +2,8 @@ import type {
   AgentTask,
   ApprovalDecision,
   ApprovalRequest,
+  DesktopBindingFailedPayload,
+  DesktopBindingConfirmPayload,
   DeviceOnlinePayload,
   OutputChunk,
   ServerToClientEventPayloads,
@@ -28,6 +30,8 @@ export interface MobileWebSocketHandlers {
   onOutput: (chunk: OutputChunk) => void;
   onApproval: (approval: ApprovalRequest) => void;
   onApprovalResult: (result: TaskApprovalResultPayload) => void;
+  onDesktopBindingConfirmed: (payload: DesktopBindingConfirmPayload) => void;
+  onDesktopBindingFailed: (payload: DesktopBindingFailedPayload) => void;
   onRelayFailed: (failure: TaskRelayFailedPayload) => void;
 }
 
@@ -124,6 +128,10 @@ export class MobileWebSocketClient {
     });
   }
 
+  confirmDesktopBinding(input: DesktopBindingConfirmPayload) {
+    this.requireSocket().emit(WS_EVENTS.DESKTOP_BINDING_CONFIRM, input);
+  }
+
   private registerHandlers(socket: Socket) {
     socket.on("connect", () => {
       const deviceId = this.deviceId;
@@ -178,6 +186,14 @@ export class MobileWebSocketClient {
 
     socket.on(WS_EVENTS.TASK_APPROVAL_RESULT, (payload: TaskApprovalResultPayload) => {
       this.handlers?.onApprovalResult(payload);
+    });
+
+    socket.on(WS_EVENTS.DESKTOP_BINDING_CONFIRMED, (payload: DesktopBindingConfirmPayload) => {
+      this.handlers?.onDesktopBindingConfirmed(payload);
+    });
+
+    socket.on(WS_EVENTS.DESKTOP_BINDING_FAILED, (payload: DesktopBindingFailedPayload) => {
+      this.handlers?.onDesktopBindingFailed(payload);
     });
 
     socket.on(WS_EVENTS.TASK_COMPLETED, (payload: TaskCompletedPayload) => {

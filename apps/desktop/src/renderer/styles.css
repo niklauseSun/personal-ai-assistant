@@ -173,6 +173,85 @@ h2 {
   min-width: 0;
 }
 
+.server-url-control {
+  background: #f8fafc;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.server-url-control.error {
+  background: #fff7f7;
+  border-color: #fca5a5;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.08);
+}
+
+.server-url-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.server-url-view-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.server-url-text {
+  color: #111827;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo,
+    monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pairing-code-panel {
+  background: #f8fafc;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+
+.pairing-code-panel span {
+  color: #5f6b7a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.pairing-code-panel strong {
+  color: #111827;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo,
+    monospace;
+  font-size: 32px;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.server-url-edit-row {
+  align-items: flex-start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
 .action-field {
   justify-content: flex-end;
 }
@@ -207,6 +286,7 @@ h2 {
 }
 
 .field span,
+.server-url-header span,
 .toggle span,
 legend {
   color: #4b5563;
@@ -254,6 +334,10 @@ input:focus,
 textarea:focus {
   border-color: #25636f;
   box-shadow: 0 0 0 3px rgba(37, 99, 111, 0.14);
+}
+
+.server-url-control.error input {
+  border-color: #dc2626;
 }
 
 input:disabled,
@@ -354,6 +438,11 @@ textarea:disabled {
   padding: 9px 14px;
 }
 
+.compact-button {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
 .button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
@@ -361,6 +450,12 @@ textarea:disabled {
 
 .primary {
   background: #25636f;
+  color: #ffffff;
+}
+
+.success-button {
+  background: #166534;
+  border-color: #166534;
   color: #ffffff;
 }
 
@@ -394,7 +489,8 @@ textarea:disabled {
 }
 
 .success,
-.error {
+.error,
+.field-error {
   font-size: 14px;
   min-height: 20px;
 }
@@ -405,6 +501,12 @@ textarea:disabled {
 
 .error {
   color: #be123c;
+}
+
+.field-error {
+  color: #be123c;
+  line-height: 1.4;
+  margin: 0;
 }
 
 .modal-backdrop {
@@ -479,7 +581,9 @@ textarea:disabled {
   }
 
   .form-grid,
-  .setup-grid {
+  .setup-grid,
+  .server-url-view-row,
+  .server-url-edit-row {
     grid-template-columns: 1fr;
   }
 

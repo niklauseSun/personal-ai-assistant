@@ -17,6 +17,15 @@ export interface DeviceSession {
   metadata?: Record<string, unknown>;
 }
 
+export interface MobileDeviceInfo {
+  deviceName?: string;
+  modelName?: string;
+  manufacturer?: string;
+  osName?: string;
+  osVersion?: string;
+  platform?: string;
+}
+
 export type AgentTaskStatus =
   | "queued"
   | "created"

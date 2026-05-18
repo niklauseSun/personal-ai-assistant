@@ -10,6 +10,8 @@ import {
 } from "@nestjs/websockets";
 import type {
   ClientType,
+  DesktopBindingFailedPayload,
+  DesktopBindingConfirmPayload,
   ServerToClientEventName,
   ServerToClientEventPayloads
 } from "@personal-ai-assistant/shared";
@@ -118,6 +120,78 @@ export class AgentGateway implements OnGatewayDisconnect {
         response
       );
       return response;
+    } catch (error) {
+      throw this.toWsException(error);
+    }
+  }
+
+  @SubscribeMessage(WS_EVENTS.DESKTOP_BINDING_CONFIRM)
+  async handleDesktopBindingConfirm(
+    @MessageBody() payload: unknown,
+    @ConnectedSocket() client: Socket
+  ) {
+    try {
+      const binding = this.deviceConnectionService.requireSocketBinding(client.id, "mobile");
+      const confirmPayload = this.toDesktopBindingConfirmPayload(payload);
+
+      if (confirmPayload.deviceId !== binding.deviceId) {
+        throw new WsException("desktop binding deviceId must match the registered mobile device");
+      }
+
+      await this.emitToDesktopTargetWithRetry({
+        deviceId: binding.deviceId,
+        targetDesktopId: confirmPayload.desktopId,
+        eventName: WS_EVENTS.DESKTOP_BINDING_CONFIRM,
+        payload: confirmPayload
+      });
+
+      return confirmPayload;
+    } catch (error) {
+      throw this.toWsException(error);
+    }
+  }
+
+  @SubscribeMessage(WS_EVENTS.DESKTOP_BINDING_CONFIRMED)
+  async handleDesktopBindingConfirmed(
+    @MessageBody() payload: unknown,
+    @ConnectedSocket() client: Socket
+  ) {
+    try {
+      const binding = this.deviceConnectionService.requireSocketBinding(client.id, "desktop");
+      const confirmPayload = this.toDesktopBindingConfirmPayload(payload);
+      this.assertDesktopBindingMatches(binding, confirmPayload.deviceId, confirmPayload.desktopId);
+
+      this.emitToClientType(
+        binding.deviceId,
+        "mobile",
+        WS_EVENTS.DESKTOP_BINDING_CONFIRMED,
+        confirmPayload
+      );
+
+      return confirmPayload;
+    } catch (error) {
+      throw this.toWsException(error);
+    }
+  }
+
+  @SubscribeMessage(WS_EVENTS.DESKTOP_BINDING_FAILED)
+  async handleDesktopBindingFailed(
+    @MessageBody() payload: unknown,
+    @ConnectedSocket() client: Socket
+  ) {
+    try {
+      const binding = this.deviceConnectionService.requireSocketBinding(client.id, "desktop");
+      const failedPayload = this.toDesktopBindingFailedPayload(payload);
+      this.assertDesktopBindingMatches(binding, failedPayload.deviceId, failedPayload.desktopId);
+
+      this.emitToClientType(
+        binding.deviceId,
+        "mobile",
+        WS_EVENTS.DESKTOP_BINDING_FAILED,
+        failedPayload
+      );
+
+      return failedPayload;
     } catch (error) {
       throw this.toWsException(error);
     }
@@ -473,6 +547,98 @@ export class AgentGateway implements OnGatewayDisconnect {
     return typeof targetDesktopId === "string" && targetDesktopId.trim()
       ? targetDesktopId.trim()
       : undefined;
+  }
+
+  private toDesktopBindingConfirmPayload(payload: unknown): DesktopBindingConfirmPayload {
+    if (!payload || typeof payload !== "object") {
+      throw new WsException("desktop binding confirmation payload is required");
+    }
+
+    const record = payload as Record<string, unknown>;
+    const deviceId = this.requiredString(record.deviceId, "deviceId");
+    const desktopId = this.requiredString(record.desktopId, "desktopId");
+    const desktopName = this.requiredString(record.desktopName, "desktopName");
+    const pairingCode = this.requiredPairingCode(record.pairingCode);
+    const mobileDevice = this.toMobileDeviceInfo(record.mobileDevice);
+    const confirmedAt = this.requiredString(record.confirmedAt, "confirmedAt");
+
+    return {
+      deviceId,
+      desktopId,
+      desktopName,
+      pairingCode,
+      mobileDevice,
+      confirmedAt
+    };
+  }
+
+  private toDesktopBindingFailedPayload(payload: unknown): DesktopBindingFailedPayload {
+    if (!payload || typeof payload !== "object") {
+      throw new WsException("desktop binding failure payload is required");
+    }
+
+    const record = payload as Record<string, unknown>;
+    return {
+      deviceId: this.requiredString(record.deviceId, "deviceId"),
+      desktopId: this.requiredString(record.desktopId, "desktopId"),
+      reason: this.requiredString(record.reason, "reason"),
+      rejectedAt: this.requiredString(record.rejectedAt, "rejectedAt")
+    };
+  }
+
+  private assertDesktopBindingMatches(binding: SocketBinding, deviceId: string, desktopId: string) {
+    if (deviceId !== binding.deviceId) {
+      throw new WsException("desktop binding deviceId must match the registered desktop device");
+    }
+
+    if (desktopId !== binding.desktopId) {
+      throw new WsException("desktop binding desktopId must match the registered desktop");
+    }
+  }
+
+  private toMobileDeviceInfo(value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new WsException("desktop binding mobileDevice must be an object");
+    }
+
+    const record = value as Record<string, unknown>;
+    return {
+      deviceName: this.optionalString(record.deviceName, "mobileDevice.deviceName"),
+      modelName: this.optionalString(record.modelName, "mobileDevice.modelName"),
+      manufacturer: this.optionalString(record.manufacturer, "mobileDevice.manufacturer"),
+      osName: this.optionalString(record.osName, "mobileDevice.osName"),
+      osVersion: this.optionalString(record.osVersion, "mobileDevice.osVersion"),
+      platform: this.optionalString(record.platform, "mobileDevice.platform")
+    };
+  }
+
+  private requiredPairingCode(value: unknown) {
+    const code = this.requiredString(value, "pairingCode");
+    if (!/^\d{6}$/.test(code)) {
+      throw new WsException("desktop binding pairingCode must be exactly 6 digits");
+    }
+
+    return code;
+  }
+
+  private optionalString(value: unknown, fieldName: string) {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    if (typeof value === "string") {
+      return value.trim() || undefined;
+    }
+
+    throw new WsException(`desktop binding ${fieldName} must be a string`);
+  }
+
+  private requiredString(value: unknown, fieldName: string) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+
+    throw new WsException(`desktop binding ${fieldName} must be a string`);
   }
 
   private toWsException(error: unknown) {
