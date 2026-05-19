@@ -45,6 +45,11 @@ export function App() {
     () => config.bindings.filter((binding) => binding.enabled).length,
     [config.bindings]
   );
+  const totalBindingCount = config.bindings.length;
+  const disabledCount = totalBindingCount - enabledCount;
+  const workspaceLabel = config.defaultWorkspacePath?.trim() || "No default workspace";
+  const bindingsOverview =
+    totalBindingCount === 0 ? "No devices" : `${enabledCount} of ${totalBindingCount} active`;
   const needsServerSetup = configuredServerUrl.length === 0 || serverStatus === "unavailable";
   const connectionModeLabel = !configuredServerUrl
     ? "Server not configured"
@@ -441,6 +446,10 @@ export function App() {
             <div>
               <p className="eyebrow">Desktop</p>
               <h1 id="desktop-title">Bind mobile</h1>
+              <p className="muted">
+                Configure the relay first, then use the generated QR flow to pair your mobile
+                assistant.
+              </p>
               {isBrowserPreview ? (
                 <p className="preview-banner">
                   Browser preview mode: settings are stored in localStorage until the Electron app
@@ -453,36 +462,53 @@ export function App() {
             </div>
           </section>
 
-          <section className="section setup-section compact-setup" aria-labelledby="setup-title">
-            <div className="compact-setup-body">
-              <ServerUrlControl
-                error={serverUrlError}
-                isEditing={isServerUrlEditing}
-                isLoading={isLoading}
-                isPinging={isPinging}
-                isSaving={isSaving}
-                onCancel={cancelServerUrlEdit}
-                onChange={updateServerUrlDraft}
-                onEdit={beginServerUrlEdit}
-                onPing={() => void pingServerUrlDraft()}
-                onSave={() => void saveServerUrlDraft()}
-                pingStatus={serverUrlPingStatus}
-                serverUrl={configuredServerUrl}
-                value={serverUrlDraft}
-              />
+          <section className="section setup-section" aria-labelledby="setup-title">
+            <div className="setup-grid">
+              <div className="setup-form">
+                <div>
+                  <h2 id="setup-title">Relay setup</h2>
+                  <p className="muted">
+                    The desktop can run locally, but mobile pairing needs a reachable relay URL.
+                  </p>
+                </div>
 
-              <div aria-live="polite" className={`server-status ${serverStatus}`}>
-                {serverStatusLabel(serverStatus)}
+                <ServerUrlControl
+                  error={serverUrlError}
+                  isEditing={isServerUrlEditing}
+                  isLoading={isLoading}
+                  isPinging={isPinging}
+                  isSaving={isSaving}
+                  onCancel={cancelServerUrlEdit}
+                  onChange={updateServerUrlDraft}
+                  onEdit={beginServerUrlEdit}
+                  onPing={() => void pingServerUrlDraft()}
+                  onSave={() => void saveServerUrlDraft()}
+                  pingStatus={serverUrlPingStatus}
+                  serverUrl={configuredServerUrl}
+                  value={serverUrlDraft}
+                />
+
+                <div aria-live="polite" className={`server-status ${serverStatus}`}>
+                  {serverStatusLabel(serverStatus)}
+                </div>
               </div>
 
-              <div className="qr-frame large">
-                {configuredServerUrl && qrBinding && qrDataUrl ? (
-                  <img alt="Desktop setup QR code" src={qrDataUrl} />
-                ) : (
-                  <div className="qr-placeholder">
-                    {qrError || "Save the server URL to generate the mobile binding QR code."}
-                  </div>
-                )}
+              <div className="setup-qr-panel">
+                <div className="qr-frame large">
+                  {configuredServerUrl && qrBinding && qrDataUrl ? (
+                    <img alt="Desktop setup QR code" src={qrDataUrl} />
+                  ) : (
+                    <div className="qr-placeholder">
+                      {qrError || "Save the server URL to prepare mobile pairing."}
+                    </div>
+                  )}
+                </div>
+                <div className="setup-meta">
+                  <span>Pairing status</span>
+                  <strong>
+                    {configuredServerUrl ? serverStatusLabel(serverStatus) : "Waiting for relay URL"}
+                  </strong>
+                </div>
               </div>
             </div>
           </section>
@@ -497,182 +523,213 @@ export function App() {
 
       {!needsServerSetup ? (
         <>
-      <section className="page-header" aria-labelledby="desktop-title">
-        <div>
-          <p className="eyebrow">Desktop</p>
-          <h1 id="desktop-title">Device bindings</h1>
-          <p className="muted">
-            This desktop works locally on its own. The default relay address is 122.51.133.4, and
-            you can change it whenever you need to bind mobile devices through another server.
-          </p>
-          {isBrowserPreview ? (
-            <p className="preview-banner">
-              Browser preview mode: settings are stored in localStorage until the Electron app
-              loads this page with its desktop bridge.
-            </p>
-          ) : null}
-        </div>
-        <div className="status-pill" aria-label="Enabled mobile bindings">
-          {connectionModeLabel}
-        </div>
-      </section>
-
-      <section className="section" aria-labelledby="connection-title">
-        <div className="section-heading">
-          <div>
-            <h2 id="connection-title">Connection</h2>
-            <p className="muted">
-              The desktop starts with 122.51.133.4 by default. Edit the relay address when this
-              desktop should bind mobile devices through another server.
-            </p>
-          </div>
-          <div aria-live="polite" className={`server-status ${serverStatus}`}>
-            {serverStatusLabel(serverStatus)}
-          </div>
-        </div>
-
-        <div className="form-grid">
-          <div className="field-wide">
-            <ServerUrlControl
-              error={serverUrlError}
-              isEditing={isServerUrlEditing}
-              isLoading={isLoading}
-              isPinging={isPinging}
-              isSaving={isSaving}
-              onCancel={cancelServerUrlEdit}
-              onChange={updateServerUrlDraft}
-              onEdit={beginServerUrlEdit}
-              onPing={() => void pingServerUrlDraft()}
-              onSave={() => void saveServerUrlDraft()}
-              pingStatus={serverUrlPingStatus}
-              serverUrl={configuredServerUrl}
-              value={serverUrlDraft}
-            />
-          </div>
-          <label className="field">
-            <span>Desktop name</span>
-            <input
-              autoCapitalize="none"
-              autoCorrect="off"
-              disabled={isLoading}
-              onChange={(event) => updateConfig("desktopName", event.target.value)}
-              placeholder="MacBook Pro"
-              value={config.desktopName}
-            />
-          </label>
-          <label className="field field-wide">
-            <span>Default workspace path</span>
-            <input
-              autoCapitalize="none"
-              autoCorrect="off"
-              disabled={isLoading}
-              onChange={(event) => updateConfig("defaultWorkspacePath", event.target.value)}
-              placeholder="/Users/me/code/project"
-              value={config.defaultWorkspacePath ?? ""}
-            />
-          </label>
-        </div>
-      </section>
-
-      <section className="section" aria-labelledby="bindings-title">
-        <div className="section-heading">
-          <div>
-            <h2 id="bindings-title">Mobile bindings</h2>
-            <p className="muted">
-              Manage binding tokens here. QR pairing stays available even when the server is down,
-              so you can prepare mobile binding before the backend comes online.
-            </p>
-          </div>
-          <div className="button-row">
-            <button
-              className="button primary"
-              disabled={isLoading || isSaving || !configuredServerUrl}
-              onClick={createPairingBinding}
-            >
-              Bind mobile by QR
-            </button>
-            <button className="button secondary" disabled={isLoading} onClick={addBinding}>
-              Add manually
-            </button>
-          </div>
-        </div>
-
-        <div className="binding-list">
-          {config.bindings.length === 0 ? (
-            <div className="empty-state">
-              <strong>No bindings yet</strong>
-              <p className="muted">Add a mobile device token to receive tasks on this desktop.</p>
+          <section className="page-header workbench-header" aria-labelledby="desktop-title">
+            <div>
+              <p className="eyebrow">Desktop</p>
+              <h1 id="desktop-title">Device bindings</h1>
+              <p className="muted">
+                This desktop works locally on its own. The default relay address is 122.51.133.4,
+                and you can change it whenever you need to bind mobile devices through another
+                server.
+              </p>
+              {isBrowserPreview ? (
+                <p className="preview-banner">
+                  Browser preview mode: settings are stored in localStorage until the Electron app
+                  loads this page with its desktop bridge.
+                </p>
+              ) : null}
             </div>
-          ) : (
-            config.bindings.map((binding) => (
-              <div className="binding-row" key={binding.id}>
-                <label className="toggle">
-                  <input
-                    checked={binding.enabled}
-                    disabled={isLoading}
-                    onChange={(event) =>
-                      updateBinding(binding.id, "enabled", event.target.checked)
-                    }
-                    type="checkbox"
+            <div className="header-status-stack">
+              <div className="status-pill" aria-label="Enabled mobile bindings">
+                {connectionModeLabel}
+              </div>
+              <span>Relay-only persistence</span>
+            </div>
+          </section>
+
+          <section className="overview-strip" aria-label="Desktop overview">
+            <div className="overview-item">
+              <span>Server</span>
+              <strong>
+                {configuredServerUrl ? serverStatusLabel(serverStatus) : "Not configured"}
+              </strong>
+            </div>
+            <div className="overview-item">
+              <span>Mobile devices</span>
+              <strong>{bindingsOverview}</strong>
+              <small>{disabledCount > 0 ? `${disabledCount} disabled` : "Ready for relay"}</small>
+            </div>
+            <div className="overview-item workspace-item">
+              <span>Workspace</span>
+              <strong title={workspaceLabel}>{workspaceLabel}</strong>
+            </div>
+          </section>
+
+          <div className="desktop-workspace">
+            <section className="section connection-section" aria-labelledby="connection-title">
+              <div className="section-heading">
+                <div>
+                  <h2 id="connection-title">Connection</h2>
+                  <p className="muted">
+                    The desktop starts with 122.51.133.4 by default. Edit the relay address when
+                    this desktop should bind mobile devices through another server.
+                  </p>
+                </div>
+                <div aria-live="polite" className={`server-status ${serverStatus}`}>
+                  {serverStatusLabel(serverStatus)}
+                </div>
+              </div>
+
+              <div className="form-grid">
+                <div className="field-wide">
+                  <ServerUrlControl
+                    error={serverUrlError}
+                    isEditing={isServerUrlEditing}
+                    isLoading={isLoading}
+                    isPinging={isPinging}
+                    isSaving={isSaving}
+                    onCancel={cancelServerUrlEdit}
+                    onChange={updateServerUrlDraft}
+                    onEdit={beginServerUrlEdit}
+                    onPing={() => void pingServerUrlDraft()}
+                    onSave={() => void saveServerUrlDraft()}
+                    pingStatus={serverUrlPingStatus}
+                    serverUrl={configuredServerUrl}
+                    value={serverUrlDraft}
                   />
-                  <span>Enabled</span>
-                </label>
-                <label className="field compact">
-                  <span>Device token</span>
+                </div>
+                <label className="field">
+                  <span>Desktop name</span>
                   <input
                     autoCapitalize="none"
                     autoCorrect="off"
                     disabled={isLoading}
-                    onChange={(event) =>
-                      updateBinding(binding.id, "deviceId", event.target.value)
-                    }
-                    placeholder="device-token"
-                    value={binding.deviceId}
+                    onChange={(event) => updateConfig("desktopName", event.target.value)}
+                    placeholder="MacBook Pro"
+                    value={config.desktopName}
                   />
                 </label>
-                <label className="field compact">
-                  <span>Label</span>
+                <label className="field field-wide">
+                  <span>Default workspace path</span>
                   <input
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     disabled={isLoading}
-                    onChange={(event) =>
-                      updateBinding(binding.id, "displayName", event.target.value)
-                    }
-                    placeholder="iPhone"
-                    value={binding.displayName ?? ""}
+                    onChange={(event) => updateConfig("defaultWorkspacePath", event.target.value)}
+                    placeholder="/Users/me/code/project"
+                    value={config.defaultWorkspacePath ?? ""}
                   />
                 </label>
-                <button
-                  className="button secondary"
-                  disabled={isLoading || !configuredServerUrl || !binding.deviceId.trim()}
-                  onClick={() => openPairingModal(binding)}
-                >
-                  QR
-                </button>
-                <button
-                  className="button danger"
-                  disabled={isLoading}
-                  onClick={() => removeBinding(binding.id)}
-                >
-                  Remove
-                </button>
               </div>
-            ))
-          )}
-        </div>
-      </section>
+            </section>
 
-      <footer className="footer">
-        <div aria-live="polite" className={isSuccessMessage(message) ? "success" : "error"}>
-          {message}
-        </div>
-        <button
-          className="button primary"
-          disabled={isLoading || isSaving || isServerUrlEditing}
-          onClick={saveConfig}
-        >
-          {isSaving ? "Saving..." : "Save desktop settings"}
-        </button>
-      </footer>
+            <section className="section bindings-section" aria-labelledby="bindings-title">
+              <div className="section-heading">
+                <div>
+                  <h2 id="bindings-title">Mobile bindings</h2>
+                  <p className="muted">
+                    Manage binding tokens here. QR pairing stays available even when the server is
+                    down, so you can prepare mobile binding before the backend comes online.
+                  </p>
+                </div>
+                <div className="button-row">
+                  <button
+                    className="button primary"
+                    disabled={isLoading || isSaving || !configuredServerUrl}
+                    onClick={createPairingBinding}
+                  >
+                    Bind mobile by QR
+                  </button>
+                  <button className="button secondary" disabled={isLoading} onClick={addBinding}>
+                    Add manually
+                  </button>
+                </div>
+              </div>
+
+              <div className="binding-list">
+                {config.bindings.length === 0 ? (
+                  <div className="empty-state">
+                    <strong>No bindings yet</strong>
+                    <p className="muted">
+                      Add a mobile device token to receive tasks on this desktop.
+                    </p>
+                  </div>
+                ) : (
+                  config.bindings.map((binding) => (
+                    <div
+                      className={`binding-row${binding.enabled ? "" : " is-disabled"}`}
+                      key={binding.id}
+                    >
+                      <label className="toggle">
+                        <input
+                          checked={binding.enabled}
+                          disabled={isLoading}
+                          onChange={(event) =>
+                            updateBinding(binding.id, "enabled", event.target.checked)
+                          }
+                          type="checkbox"
+                        />
+                        <span>Enabled</span>
+                      </label>
+                      <label className="field compact">
+                        <span>Device token</span>
+                        <input
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          disabled={isLoading}
+                          onChange={(event) =>
+                            updateBinding(binding.id, "deviceId", event.target.value)
+                          }
+                          placeholder="device-token"
+                          value={binding.deviceId}
+                        />
+                      </label>
+                      <label className="field compact">
+                        <span>Label</span>
+                        <input
+                          disabled={isLoading}
+                          onChange={(event) =>
+                            updateBinding(binding.id, "displayName", event.target.value)
+                          }
+                          placeholder="iPhone"
+                          value={binding.displayName ?? ""}
+                        />
+                      </label>
+                      <div className="binding-actions">
+                        <button
+                          className="button secondary compact-button"
+                          disabled={isLoading || !configuredServerUrl || !binding.deviceId.trim()}
+                          onClick={() => openPairingModal(binding)}
+                        >
+                          QR
+                        </button>
+                        <button
+                          className="button danger compact-button"
+                          disabled={isLoading}
+                          onClick={() => removeBinding(binding.id)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          </div>
+
+          <footer className="footer">
+            <div aria-live="polite" className={isSuccessMessage(message) ? "success" : "error"}>
+              {message}
+            </div>
+            <button
+              className="button primary"
+              disabled={isLoading || isSaving || isServerUrlEditing}
+              onClick={saveConfig}
+            >
+              {isSaving ? "Saving..." : "Save desktop settings"}
+            </button>
+          </footer>
         </>
       ) : null}
 
