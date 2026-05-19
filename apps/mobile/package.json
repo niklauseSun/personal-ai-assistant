@@ -11,8 +11,9 @@
     "typecheck": "pnpm check:animations && tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@babel/runtime": "^7.29.2",
     "@op-engineering/op-sqlite": "^16.0.0",
-    "@personal-ai-assistant/shared": "workspace:*",
+    "@personal-ai-assistant/shared": "file:../../packages/shared",
     "@react-native-async-storage/async-storage": "2.1.2",
     "react": "^19.0.0",
     "react-native": "^0.79.0",
