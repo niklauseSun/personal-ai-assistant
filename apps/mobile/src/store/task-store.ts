@@ -22,8 +22,6 @@ export type MobileScreen = "tasks" | "create" | "detail" | "scanBinding" | "conf
 export type ConnectionStatus = "idle" | "connecting" | "connected" | "disconnected";
 
 interface TaskState {
-  serverUrl: string;
-  deviceId: string;
   connectionStatus: ConnectionStatus;
   errorMessage?: string;
   tasksById: Record<string, AgentTask>;
@@ -33,7 +31,6 @@ interface TaskState {
   selectedTaskId?: string;
   screen: MobileScreen;
   isLoadingHistory: boolean;
-  setConfig: (config: { serverUrl: string; deviceId: string }) => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
   setError: (message?: string) => void;
   setScreen: (screen: MobileScreen) => void;
@@ -60,8 +57,6 @@ function sortTaskIds(tasksById: Record<string, AgentTask>) {
 }
 
 export const useTaskStore = create<TaskState>((set) => ({
-      serverUrl: "http://localhost:3000",
-      deviceId: "",
       connectionStatus: "idle",
       tasksById: {},
       taskIds: [],
@@ -69,11 +64,6 @@ export const useTaskStore = create<TaskState>((set) => ({
       approvalsByTaskId: {},
       screen: "tasks",
       isLoadingHistory: false,
-      setConfig: (config) =>
-        set({
-          serverUrl: config.serverUrl.trim(),
-          deviceId: config.deviceId.trim()
-        }),
       setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
       setError: (errorMessage) => set({ errorMessage }),
       setScreen: (screen) => set({ screen }),

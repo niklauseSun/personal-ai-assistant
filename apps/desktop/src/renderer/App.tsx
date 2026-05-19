@@ -11,7 +11,7 @@ import { io } from "socket.io-client";
 import { pingServerHealth, type ServerHealthStatus } from "./server-health";
 
 const BROWSER_CONFIG_STORAGE_KEY = "personal-ai-assistant.desktop-config";
-const DEFAULT_SERVER_URL = "http://localhost:3000";
+const DEFAULT_SERVER_URL = "http://122.51.133.4:3000";
 type ServerStatus = "checking" | ServerHealthStatus;
 
 const emptyConfig: DesktopAppConfig = {
@@ -502,8 +502,8 @@ export function App() {
           <p className="eyebrow">Desktop</p>
           <h1 id="desktop-title">Device bindings</h1>
           <p className="muted">
-            This desktop works locally on its own. The default relay address is localhost, and you
-            can change it whenever you need to bind mobile devices through another server.
+            This desktop works locally on its own. The default relay address is 122.51.133.4, and
+            you can change it whenever you need to bind mobile devices through another server.
           </p>
           {isBrowserPreview ? (
             <p className="preview-banner">
@@ -522,7 +522,7 @@ export function App() {
           <div>
             <h2 id="connection-title">Connection</h2>
             <p className="muted">
-              The desktop starts with localhost by default. Edit the relay address when this
+              The desktop starts with 122.51.133.4 by default. Edit the relay address when this
               desktop should bind mobile devices through another server.
             </p>
           </div>

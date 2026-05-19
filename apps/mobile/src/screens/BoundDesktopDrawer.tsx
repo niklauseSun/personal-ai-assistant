@@ -80,9 +80,6 @@ export function BoundDesktopDrawer({
                     <Text numberOfLines={1} style={sharedStyles.muted}>
                       {desktop.serverUrl}
                     </Text>
-                    <Text numberOfLines={1} style={styles.tokenText}>
-                      {desktop.deviceId}
-                    </Text>
                     <Text
                       numberOfLines={1}
                       style={[
@@ -187,9 +184,5 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 20,
     fontWeight: "700"
-  },
-  tokenText: {
-    color: colors.muted,
-    fontSize: 12
   }
 });

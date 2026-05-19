@@ -4,26 +4,29 @@
   "private": true,
   "main": "index.js",
   "scripts": {
-    "android": "expo run:android",
+    "android": "react-native run-android",
     "check:animations": "node scripts/check-no-react-native-animated.mjs",
-    "ios": "expo run:ios",
-    "start": "expo start",
+    "ios": "react-native run-ios",
+    "start": "react-native start",
     "typecheck": "pnpm check:animations && tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@op-engineering/op-sqlite": "^16.0.0",
     "@personal-ai-assistant/shared": "workspace:*",
     "@react-native-async-storage/async-storage": "2.1.2",
-    "expo": "^53.0.0",
-    "expo-camera": "~16.1.11",
-    "expo-sqlite": "~15.2.14",
-    "expo-system-ui": "~5.0.11",
     "react": "^19.0.0",
     "react-native": "^0.79.0",
     "react-native-reanimated": "~3.17.5",
+    "react-native-vision-camera": "^4.7.2",
     "socket.io-client": "^4.8.3",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@react-native-community/cli": "^20.1.3",
+    "@react-native-community/cli-platform-android": "^20.1.3",
+    "@react-native-community/cli-platform-ios": "^20.1.3",
+    "@react-native/babel-preset": "^0.79.7",
+    "@react-native/metro-config": "^0.79.7",
     "@types/react": "^19.0.0",
     "typescript": "^5.9.3"
   }

@@ -1,7 +1,11 @@
+import { open, type Scalar, type SQLBatchTuple } from "@op-engineering/op-sqlite";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { AgentTask, ApprovalRequest, OutputChunk } from "@personal-ai-assistant/shared";
-import { openDatabaseAsync, type SQLiteDatabase } from "expo-sqlite";
 
-const DATABASE_NAME = "personal_ai_task_history.db";
+const DATABASE_NAME = "personal-ai-assistant-task-history.sqlite";
+const LEGACY_STORAGE_KEY = "personal-ai-assistant.task-history.v1";
+
+const db = open({ name: DATABASE_NAME });
 
 export interface TaskHistorySnapshot {
   tasks: AgentTask[];
@@ -9,230 +13,312 @@ export interface TaskHistorySnapshot {
   approvalsByTaskId: Record<string, ApprovalRequest[]>;
 }
 
-interface JsonRow {
-  json: string;
-}
-
-let databasePromise: Promise<SQLiteDatabase> | undefined;
+let databaseReady: Promise<void> | undefined;
+let writeQueue: Promise<void> = Promise.resolve();
 
 export async function loadTaskHistoryFromDatabase(): Promise<TaskHistorySnapshot> {
-  const db = await getDatabase();
-  const taskRows = await db.getAllAsync<JsonRow>(
-    "SELECT task_json AS json FROM agent_tasks ORDER BY created_at DESC, id DESC"
+  await ensureDatabaseReady();
+  await writeQueue;
+
+  const taskRows = await db.execute(
+    "SELECT payload FROM tasks ORDER BY created_at DESC, id DESC"
   );
-  const outputRows = await db.getAllAsync<JsonRow>(
-    "SELECT chunk_json AS json FROM output_chunks ORDER BY task_id ASC, sequence ASC"
+  const outputRows = await db.execute(
+    "SELECT payload FROM outputs ORDER BY task_id ASC, sequence ASC, id ASC"
   );
-  const approvalRows = await db.getAllAsync<JsonRow>(
-    "SELECT approval_json AS json FROM approval_requests ORDER BY task_id ASC, created_at ASC"
+  const approvalRows = await db.execute(
+    "SELECT payload FROM approvals ORDER BY task_id ASC, created_at ASC, id ASC"
   );
 
-  const tasks = taskRows.map((row) => parseJson<AgentTask>(row.json)).filter(isPresent);
   const outputsByTaskId: Record<string, OutputChunk[]> = {};
-  const approvalsByTaskId: Record<string, ApprovalRequest[]> = {};
-
-  for (const chunk of outputRows.map((row) => parseJson<OutputChunk>(row.json)).filter(isPresent)) {
-    outputsByTaskId[chunk.taskId] = [...(outputsByTaskId[chunk.taskId] ?? []), chunk];
+  for (const chunk of sortOutputs(parsePayloadRows<OutputChunk>(outputRows.rows))) {
+    (outputsByTaskId[chunk.taskId] ??= []).push(chunk);
   }
 
-  for (const approval of approvalRows
-    .map((row) => parseJson<ApprovalRequest>(row.json))
-    .filter(isPresent)) {
-    approvalsByTaskId[approval.taskId] = [
-      ...(approvalsByTaskId[approval.taskId] ?? []),
-      approval
-    ];
+  const approvalsByTaskId: Record<string, ApprovalRequest[]> = {};
+  for (const approval of sortApprovals(parsePayloadRows<ApprovalRequest>(approvalRows.rows))) {
+    (approvalsByTaskId[approval.taskId] ??= []).push(approval);
   }
 
   return {
-    tasks,
+    tasks: sortTasks(parsePayloadRows<AgentTask>(taskRows.rows)),
     outputsByTaskId,
     approvalsByTaskId
   };
 }
 
 export async function saveTasksToDatabase(tasks: AgentTask[]) {
-  const db = await getDatabase();
-  await db.withTransactionAsync(async () => {
-    for (const task of tasks) {
-      await saveTask(db, task);
-    }
-  });
+  if (tasks.length === 0) {
+    return;
+  }
+
+  await enqueueWrite(() => executeCommands(tasks.map(toTaskUpsertCommand)));
 }
 
 export async function saveTaskToDatabase(task: AgentTask) {
-  const db = await getDatabase();
-  await saveTask(db, task);
+  await enqueueWrite(() => executeCommands([toTaskUpsertCommand(task)]));
 }
 
 export async function saveOutputToDatabase(chunk: OutputChunk) {
-  const db = await getDatabase();
-  await db.runAsync(
-    `INSERT OR REPLACE INTO output_chunks
-      (id, task_id, sequence, stream, created_at, chunk_json)
-      VALUES (?, ?, ?, ?, ?, ?)`,
-    [chunk.id, chunk.taskId, chunk.sequence, chunk.stream, chunk.createdAt, JSON.stringify(chunk)]
-  );
+  await enqueueWrite(() => executeCommands([toOutputUpsertCommand(chunk)]));
 }
 
 export async function saveOutputsForTaskToDatabase(taskId: string, outputs: OutputChunk[]) {
-  const db = await getDatabase();
-  await db.withTransactionAsync(async () => {
-    await db.runAsync("DELETE FROM output_chunks WHERE task_id = ?", [taskId]);
-    for (const output of outputs) {
-      await db.runAsync(
-        `INSERT OR REPLACE INTO output_chunks
-          (id, task_id, sequence, stream, created_at, chunk_json)
-          VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          output.id,
-          output.taskId,
-          output.sequence,
-          output.stream,
-          output.createdAt,
-          JSON.stringify(output)
-        ]
-      );
-    }
-  });
+  await enqueueWrite(() =>
+    executeCommands([
+      ["DELETE FROM outputs WHERE task_id = ?", [taskId]],
+      ...sortOutputs(outputs).map(toOutputUpsertCommand)
+    ])
+  );
 }
 
 export async function saveApprovalToDatabase(approval: ApprovalRequest) {
-  const db = await getDatabase();
-  await saveApproval(db, approval);
+  await enqueueWrite(() => executeCommands([toApprovalUpsertCommand(approval)]));
 }
 
 export async function saveApprovalsForTaskToDatabase(
   taskId: string,
   approvals: ApprovalRequest[]
 ) {
-  const db = await getDatabase();
-  await db.withTransactionAsync(async () => {
-    await db.runAsync("DELETE FROM approval_requests WHERE task_id = ?", [taskId]);
-    for (const approval of approvals) {
-      await saveApproval(db, approval);
-    }
-  });
+  await enqueueWrite(() =>
+    executeCommands([
+      ["DELETE FROM approvals WHERE task_id = ?", [taskId]],
+      ...sortApprovals(approvals).map(toApprovalUpsertCommand)
+    ])
+  );
 }
 
 export async function deleteTaskFromDatabase(taskId: string) {
-  const db = await getDatabase();
-  await db.withTransactionAsync(async () => {
-    await db.runAsync("DELETE FROM output_chunks WHERE task_id = ?", [taskId]);
-    await db.runAsync("DELETE FROM approval_requests WHERE task_id = ?", [taskId]);
-    await db.runAsync("DELETE FROM agent_tasks WHERE id = ?", [taskId]);
-  });
+  await enqueueWrite(() =>
+    executeCommands([
+      ["DELETE FROM approvals WHERE task_id = ?", [taskId]],
+      ["DELETE FROM outputs WHERE task_id = ?", [taskId]],
+      ["DELETE FROM tasks WHERE id = ?", [taskId]]
+    ])
+  );
 }
 
 export async function clearTasksFromDatabase(taskIds?: string[]) {
-  const db = await getDatabase();
-  if (!taskIds) {
-    await db.withTransactionAsync(async () => {
-      await db.runAsync("DELETE FROM output_chunks", []);
-      await db.runAsync("DELETE FROM approval_requests", []);
-      await db.runAsync("DELETE FROM agent_tasks", []);
-    });
-    return;
-  }
+  await enqueueWrite(() => {
+    if (!taskIds) {
+      return executeCommands([
+        ["DELETE FROM approvals"],
+        ["DELETE FROM outputs"],
+        ["DELETE FROM tasks"]
+      ]);
+    }
 
-  if (taskIds.length === 0) {
-    return;
-  }
+    if (taskIds.length === 0) {
+      return Promise.resolve();
+    }
 
-  const placeholders = taskIds.map(() => "?").join(", ");
-  await db.withTransactionAsync(async () => {
-    await db.runAsync(`DELETE FROM output_chunks WHERE task_id IN (${placeholders})`, taskIds);
-    await db.runAsync(`DELETE FROM approval_requests WHERE task_id IN (${placeholders})`, taskIds);
-    await db.runAsync(`DELETE FROM agent_tasks WHERE id IN (${placeholders})`, taskIds);
+    return executeCommands(taskIds.flatMap(toTaskDeleteCommands));
   });
 }
 
-async function getDatabase() {
-  databasePromise ??= openDatabaseAsync(DATABASE_NAME).then(async (db) => {
-    await db.execAsync(`
-      PRAGMA foreign_keys = ON;
+function ensureDatabaseReady() {
+  databaseReady ??= initializeDatabase();
+  return databaseReady;
+}
 
-      CREATE TABLE IF NOT EXISTS agent_tasks (
-        id TEXT PRIMARY KEY NOT NULL,
-        device_id TEXT NOT NULL,
-        assigned_desktop_device_id TEXT,
-        status TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        task_json TEXT NOT NULL
-      );
+async function initializeDatabase() {
+  await db.execute("PRAGMA journal_mode = WAL");
+  await db.execute("PRAGMA foreign_keys = ON");
+  await db.executeBatch([
+    [
+      "CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, payload TEXT NOT NULL)"
+    ],
+    [
+      "CREATE TABLE IF NOT EXISTS outputs (id TEXT PRIMARY KEY NOT NULL, task_id TEXT NOT NULL, sequence INTEGER NOT NULL, created_at TEXT NOT NULL, payload TEXT NOT NULL)"
+    ],
+    [
+      "CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY NOT NULL, task_id TEXT NOT NULL, created_at TEXT NOT NULL, payload TEXT NOT NULL)"
+    ],
+    ["CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at DESC)"],
+    ["CREATE INDEX IF NOT EXISTS idx_outputs_task_sequence ON outputs(task_id, sequence ASC)"],
+    ["CREATE INDEX IF NOT EXISTS idx_approvals_task_created ON approvals(task_id, created_at ASC)"],
+    ["PRAGMA user_version = 1"]
+  ]);
+  await migrateLegacyAsyncStorageSnapshot();
+}
 
-      CREATE INDEX IF NOT EXISTS idx_agent_tasks_device_created
-        ON agent_tasks(device_id, created_at);
-      CREATE INDEX IF NOT EXISTS idx_agent_tasks_status
-        ON agent_tasks(status);
+async function migrateLegacyAsyncStorageSnapshot() {
+  const raw = await AsyncStorage.getItem(LEGACY_STORAGE_KEY);
+  if (!raw) {
+    return;
+  }
 
-      CREATE TABLE IF NOT EXISTS output_chunks (
-        id TEXT PRIMARY KEY NOT NULL,
-        task_id TEXT NOT NULL,
-        sequence INTEGER NOT NULL,
-        stream TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        chunk_json TEXT NOT NULL,
-        FOREIGN KEY(task_id) REFERENCES agent_tasks(id) ON DELETE CASCADE
-      );
+  const snapshot = normalizeSnapshot(
+    parseJson<Partial<TaskHistorySnapshot>>(raw) ?? createEmptySnapshot()
+  );
+  const hasLegacyRows =
+    snapshot.tasks.length > 0 ||
+    Object.keys(snapshot.outputsByTaskId).length > 0 ||
+    Object.keys(snapshot.approvalsByTaskId).length > 0;
 
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_output_chunks_task_sequence
-        ON output_chunks(task_id, sequence);
+  if (!hasLegacyRows) {
+    await AsyncStorage.removeItem(LEGACY_STORAGE_KEY);
+    return;
+  }
 
-      CREATE TABLE IF NOT EXISTS approval_requests (
-        id TEXT PRIMARY KEY NOT NULL,
-        task_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        approval_json TEXT NOT NULL,
-        FOREIGN KEY(task_id) REFERENCES agent_tasks(id) ON DELETE CASCADE
-      );
+  const existingCount = await countRows();
+  if (existingCount === 0) {
+    await replaceDatabaseSnapshot(snapshot);
+  }
 
-      CREATE INDEX IF NOT EXISTS idx_approval_requests_task_created
-        ON approval_requests(task_id, created_at);
-    `);
-    return db;
+  await AsyncStorage.removeItem(LEGACY_STORAGE_KEY);
+}
+
+async function enqueueWrite(operation: () => Promise<void>) {
+  const run = async () => {
+    await ensureDatabaseReady();
+    await operation();
+  };
+
+  const result = writeQueue.then(run, run);
+  writeQueue = result.catch(() => undefined);
+  await result;
+}
+
+async function executeCommands(commands: SQLBatchTuple[]) {
+  if (commands.length === 0) {
+    return;
+  }
+
+  await db.executeBatch(commands);
+}
+
+async function replaceDatabaseSnapshot(snapshot: TaskHistorySnapshot) {
+  await executeCommands([
+    ["DELETE FROM approvals"],
+    ["DELETE FROM outputs"],
+    ["DELETE FROM tasks"],
+    ...sortTasks(snapshot.tasks).map(toTaskUpsertCommand),
+    ...Object.values(snapshot.outputsByTaskId).flatMap((outputs) =>
+      sortOutputs(outputs).map(toOutputUpsertCommand)
+    ),
+    ...Object.values(snapshot.approvalsByTaskId).flatMap((approvals) =>
+      sortApprovals(approvals).map(toApprovalUpsertCommand)
+    )
+  ]);
+}
+
+async function countRows() {
+  const result = await db.execute(
+    "SELECT (SELECT COUNT(*) FROM tasks) + (SELECT COUNT(*) FROM outputs) + (SELECT COUNT(*) FROM approvals) AS row_count"
+  );
+  const rowCount = result.rows[0]?.row_count;
+  if (typeof rowCount === "number") {
+    return rowCount;
+  }
+  if (typeof rowCount === "string") {
+    return Number(rowCount) || 0;
+  }
+  return 0;
+}
+
+function toTaskUpsertCommand(task: AgentTask): SQLBatchTuple {
+  return [
+    "INSERT OR REPLACE INTO tasks (id, created_at, updated_at, payload) VALUES (?, ?, ?, ?)",
+    [task.id, task.createdAt, task.updatedAt, JSON.stringify(task)]
+  ];
+}
+
+function toOutputUpsertCommand(chunk: OutputChunk): SQLBatchTuple {
+  return [
+    "INSERT OR REPLACE INTO outputs (id, task_id, sequence, created_at, payload) VALUES (?, ?, ?, ?, ?)",
+    [chunk.id, chunk.taskId, chunk.sequence, chunk.createdAt, JSON.stringify(chunk)]
+  ];
+}
+
+function toApprovalUpsertCommand(approval: ApprovalRequest): SQLBatchTuple {
+  return [
+    "INSERT OR REPLACE INTO approvals (id, task_id, created_at, payload) VALUES (?, ?, ?, ?)",
+    [approval.id, approval.taskId, approval.createdAt, JSON.stringify(approval)]
+  ];
+}
+
+function toTaskDeleteCommands(taskId: string): SQLBatchTuple[] {
+  return [
+    ["DELETE FROM approvals WHERE task_id = ?", [taskId]],
+    ["DELETE FROM outputs WHERE task_id = ?", [taskId]],
+    ["DELETE FROM tasks WHERE id = ?", [taskId]]
+  ];
+}
+
+function normalizeSnapshot(snapshot: Partial<TaskHistorySnapshot>): TaskHistorySnapshot {
+  return {
+    tasks: sortTasks(readRecordArray<AgentTask>(snapshot.tasks)),
+    outputsByTaskId: normalizeGroupedArray<OutputChunk>(snapshot.outputsByTaskId, sortOutputs),
+    approvalsByTaskId: normalizeGroupedArray<ApprovalRequest>(
+      snapshot.approvalsByTaskId,
+      sortApprovals
+    )
+  };
+}
+
+function parsePayloadRows<Value>(rows: Array<Record<string, Scalar>>) {
+  return rows.map((row) => parseRecordPayload<Value>(row.payload)).filter(isDefined);
+}
+
+function parseRecordPayload<Value>(payload: Scalar | undefined): Value | undefined {
+  if (typeof payload !== "string") {
+    return undefined;
+  }
+
+  const parsed = parseJson<unknown>(payload);
+  return isRecord(parsed) ? (parsed as Value) : undefined;
+}
+
+function normalizeGroupedArray<Value>(
+  value: unknown,
+  sort: (items: Value[]) => Value[]
+): Record<string, Value[]> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, Value[]> = {};
+  for (const [key, items] of Object.entries(value)) {
+    normalized[key] = sort(readRecordArray<Value>(items));
+  }
+  return normalized;
+}
+
+function readRecordArray<Value>(value: unknown) {
+  return Array.isArray(value) ? value.filter(isRecord).map((item) => item as Value) : [];
+}
+
+function createEmptySnapshot(): TaskHistorySnapshot {
+  return {
+    tasks: [],
+    outputsByTaskId: {},
+    approvalsByTaskId: {}
+  };
+}
+
+function sortTasks(tasks: AgentTask[]) {
+  return [...tasks].sort((left, right) => {
+    const createdDiff = Date.parse(right.createdAt) - Date.parse(left.createdAt);
+    return createdDiff || right.id.localeCompare(left.id);
   });
-
-  return databasePromise;
 }
 
-async function saveTask(db: SQLiteDatabase, task: AgentTask) {
-  await db.runAsync(
-    `INSERT OR REPLACE INTO agent_tasks
-      (id, device_id, assigned_desktop_device_id, status, prompt, created_at, updated_at, task_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      task.id,
-      task.createdByDeviceId,
-      task.assignedDesktopDeviceId ?? null,
-      task.status,
-      task.prompt,
-      task.createdAt,
-      task.updatedAt,
-      JSON.stringify(task)
-    ]
+function sortOutputs(outputs: OutputChunk[]) {
+  return [...outputs].sort((left, right) => left.sequence - right.sequence);
+}
+
+function sortApprovals(approvals: ApprovalRequest[]) {
+  return [...approvals].sort(
+    (left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt)
   );
 }
 
-async function saveApproval(db: SQLiteDatabase, approval: ApprovalRequest) {
-  await db.runAsync(
-    `INSERT OR REPLACE INTO approval_requests
-      (id, task_id, status, created_at, approval_json)
-      VALUES (?, ?, ?, ?, ?)`,
-    [
-      approval.id,
-      approval.taskId,
-      approval.status,
-      approval.createdAt,
-      JSON.stringify(approval)
-    ]
-  );
-}
+function parseJson<Value>(raw: string | null): Value | undefined {
+  if (!raw) {
+    return undefined;
+  }
 
-function parseJson<Value>(raw: string): Value | undefined {
   try {
     return JSON.parse(raw) as Value;
   } catch {
@@ -240,6 +326,10 @@ function parseJson<Value>(raw: string): Value | undefined {
   }
 }
 
-function isPresent<Value>(value: Value | undefined): value is Value {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isDefined<Value>(value: Value | undefined): value is Value {
   return value !== undefined;
 }

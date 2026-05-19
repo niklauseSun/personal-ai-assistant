@@ -7,7 +7,7 @@ import type { DesktopAppConfig } from "@personal-ai-assistant/shared";
 import { DesktopConfigStore, normalizeConfig } from "./desktop-config-store";
 
 const fallback: DesktopAppConfig = {
-  serverUrl: "http://localhost:3000",
+  serverUrl: "http://122.51.133.4:3000",
   desktopName: "desk-1",
   serverPersistence: "persist",
   bindings: []
@@ -94,6 +94,15 @@ describe("DesktopConfigStore", () => {
     assert.equal(loaded.serverPersistence, "relay_only");
     assert.equal(loaded.bindings[0].deviceId, "mobile-a");
     assert.equal(loaded.bindings[1].enabled, false);
+  });
+
+  it("creates a new default config with the packaged server URL", async () => {
+    const userDataPath = await mkdtemp(path.join(os.tmpdir(), "desktop-config-store-"));
+    const store = new DesktopConfigStore(userDataPath);
+    const config = await store.load();
+
+    assert.equal(config.serverUrl, "http://122.51.133.4:3000");
+    assert.equal(config.bindings.length, 0);
   });
 
   it("preserves an intentionally empty server URL when the user clears it", () => {

@@ -64,7 +64,7 @@ function createLocalTaskId() {
 function filterLocalTasks(
   tasks: AgentTask[],
   filters: HistoryFilters,
-  deviceId: string | undefined,
+  bindingToken: string | undefined,
   desktopId: string | undefined
 ) {
   const normalizedPrompt = filters.prompt.trim().toLowerCase();
@@ -72,7 +72,7 @@ function filterLocalTasks(
   const createdTo = parseOptionalTime(filters.createdTo);
 
   return tasks.filter((task) => {
-    if (deviceId && task.createdByDeviceId !== deviceId) {
+    if (bindingToken && task.createdByDeviceId !== bindingToken) {
       return false;
     }
 
@@ -209,7 +209,7 @@ function PairingCodeScreen({
 
       <View style={sharedStyles.card}>
         <Text style={styles.confirmDesktopName}>{desktop?.desktopName ?? "Desktop"}</Text>
-        <Text style={sharedStyles.muted}>{desktop?.serverUrl ?? "No server URL"}</Text>
+        <Text style={sharedStyles.muted}>{desktop?.serverUrl ?? "No relay URL from desktop"}</Text>
         <Text style={styles.deviceText}>Relay status: {connectionStatus}</Text>
       </View>
 
@@ -242,14 +242,71 @@ function PairingCodeScreen({
   );
 }
 
+function HeaderDeviceIcon() {
+  return (
+    <View style={styles.headerIcon}>
+      <View style={styles.headerMonitorScreen} />
+      <View style={styles.headerMonitorStand} />
+      <View style={styles.headerMonitorBase} />
+    </View>
+  );
+}
+
+function MenuGlyph() {
+  return (
+    <View style={styles.menuGlyph}>
+      <View style={styles.menuLine} />
+      <View style={styles.menuLine} />
+      <View style={styles.menuLine} />
+    </View>
+  );
+}
+
+function LinkGlyph({ light = false }: { light?: boolean }) {
+  return (
+    <View style={styles.linkGlyph}>
+      <View
+        style={[styles.linkLoop, light ? styles.linkLoopLight : null, styles.linkLoopLeft]}
+      />
+      <View
+        style={[styles.linkLoop, light ? styles.linkLoopLight : null, styles.linkLoopRight]}
+      />
+    </View>
+  );
+}
+
+function UnboundDeviceIllustration() {
+  return (
+    <View style={styles.unboundIllustration}>
+      <Text style={[styles.sparkle, styles.sparkleTopLeft]}>+</Text>
+      <Text style={[styles.sparkle, styles.sparkleTopRight]}>+</Text>
+      <Text style={[styles.sparkle, styles.sparkleLeft]}>+</Text>
+      <Text style={[styles.sparkle, styles.sparkleRight]}>+</Text>
+      <View style={styles.sparkleCircle} />
+      <View style={styles.sparkleDiamond} />
+
+      <View style={styles.heroMonitor}>
+        <View style={styles.heroMonitorInner}>
+          <View style={styles.heroLinkCircle}>
+            <LinkGlyph />
+          </View>
+        </View>
+      </View>
+      <View style={styles.heroMonitorStem} />
+      <View style={styles.heroMonitorBase} />
+      <View style={styles.alertBubble}>
+        <Text style={styles.alertBubbleText}>!</Text>
+      </View>
+    </View>
+  );
+}
+
 export default function App() {
   const clientRef = useRef(new MobileWebSocketClient());
   const boundDesktopsRef = useRef<MobileBoundDesktop[]>([]);
   const pendingScannedDesktopRef = useRef<MobileBoundDesktop | undefined>(undefined);
   const hasSentBindingConfirmRef = useRef(false);
   const {
-    serverUrl,
-    deviceId,
     connectionStatus,
     errorMessage,
     taskIds,
@@ -261,8 +318,6 @@ export default function App() {
     isLoadingHistory
   } = useTaskStore();
 
-  const [serverUrlInput, setServerUrlInput] = useState(serverUrl);
-  const [deviceIdInput, setDeviceIdInput] = useState(deviceId);
   const [historyFilters, setHistoryFilters] = useState<HistoryFilters>({
     status: "all",
     prompt: "",
@@ -337,12 +392,6 @@ export default function App() {
 
         if (defaultDesktop) {
           setActiveBoundDesktopId(defaultDesktop.id);
-          setServerUrlInput(defaultDesktop.serverUrl);
-          setDeviceIdInput(defaultDesktop.deviceId);
-          useTaskStore.getState().setConfig({
-            serverUrl: defaultDesktop.serverUrl,
-            deviceId: defaultDesktop.deviceId
-          });
         }
         setDesktopBindingsLoading(false);
       })
@@ -416,10 +465,10 @@ export default function App() {
       filterLocalTasks(
         tasks,
         historyFilters,
-        activeBoundDesktop?.deviceId ?? deviceId,
+        activeBoundDesktop?.bindingToken,
         activeBoundDesktop?.desktopId
       ),
-    [activeBoundDesktop, deviceId, historyFilters, tasks]
+    [activeBoundDesktop, historyFilters, tasks]
   );
   const panResponder = useMemo(
     () =>
@@ -443,6 +492,8 @@ export default function App() {
   const canCancel = selectedTask
     ? ["created", "running", "started", "waiting_approval"].includes(selectedTask.status)
     : false;
+  const isUnboundHome =
+    !isLoadingDesktopBindings && boundDesktops.length === 0 && screen === "tasks";
 
   const updatePendingScannedDesktop = (desktop: MobileBoundDesktop | undefined) => {
     pendingScannedDesktopRef.current = desktop;
@@ -477,35 +528,41 @@ export default function App() {
   };
 
   const connect = () => {
-    connectTo(serverUrlInput, deviceIdInput);
+    if (!activeBoundDesktop) {
+      Alert.alert("No desktop selected", "Bind or select a desktop before connecting.");
+      return;
+    }
+
+    connectToDesktop(activeBoundDesktop);
   };
 
-  const connectTo = (rawServerUrl: string, rawDeviceId: string) => {
-    const normalizedServerUrl = rawServerUrl.trim();
-    const normalizedDeviceId = rawDeviceId.trim();
+  const openBindingHelp = () => {
+    Alert.alert(
+      "如何绑定设备",
+      "在桌面端生成绑定二维码，然后使用手机扫描二维码完成绑定。"
+    );
+  };
+
+  const connectToDesktop = (desktop: MobileBoundDesktop) => {
+    const normalizedServerUrl = desktop.serverUrl.trim();
+    const bindingToken = desktop.bindingToken.trim();
 
     if (!normalizedServerUrl) {
-      Alert.alert("Missing server URL", "Enter the server URL before connecting.");
+      Alert.alert("Missing relay URL", "This desktop binding does not include a relay URL.");
       return;
     }
 
-    if (!normalizedDeviceId) {
-      Alert.alert("Missing device ID", "Enter a deviceId before connecting.");
+    if (!bindingToken) {
+      Alert.alert("Invalid desktop binding", "Scan the desktop QR code again.");
       return;
     }
 
-    useTaskStore.getState().setConfig({
-      serverUrl: normalizedServerUrl,
-      deviceId: normalizedDeviceId
-    });
-    setServerUrlInput(normalizedServerUrl);
-    setDeviceIdInput(normalizedDeviceId);
     useTaskStore.getState().setError(undefined);
     setDesktopSessions([]);
 
     clientRef.current.connect({
       serverUrl: normalizedServerUrl,
-      deviceId: normalizedDeviceId,
+      bindingToken,
       handlers: {
         onConnectionStatus: (status) => useTaskStore.getState().setConnectionStatus(status),
         onDeviceOnline: (payload) => {
@@ -528,7 +585,7 @@ export default function App() {
           if (
             pendingDesktop &&
             payload.session.clientType === "mobile" &&
-            payload.session.deviceId === pendingDesktop.deviceId
+            payload.session.deviceId === pendingDesktop.bindingToken
           ) {
             useTaskStore.getState().setError(undefined);
             return;
@@ -545,7 +602,7 @@ export default function App() {
           const pendingDesktop = pendingScannedDesktopRef.current;
           if (
             !pendingDesktop ||
-            payload.deviceId !== pendingDesktop.deviceId ||
+            payload.deviceId !== pendingDesktop.bindingToken ||
             payload.desktopId !== pendingDesktop.desktopId
           ) {
             return;
@@ -582,7 +639,7 @@ export default function App() {
           const pendingDesktop = pendingScannedDesktopRef.current;
           if (
             !pendingDesktop ||
-            failure.deviceId !== pendingDesktop.deviceId ||
+            failure.deviceId !== pendingDesktop.bindingToken ||
             failure.desktopId !== pendingDesktop.desktopId
           ) {
             return;
@@ -629,12 +686,6 @@ export default function App() {
     setBoundDesktops(nextDesktops);
     setActiveBoundDesktopId(nextDesktop.id);
     setDesktopDrawerOpen(false);
-    setServerUrlInput(nextDesktop.serverUrl);
-    setDeviceIdInput(nextDesktop.deviceId);
-    useTaskStore.getState().setConfig({
-      serverUrl: nextDesktop.serverUrl,
-      deviceId: nextDesktop.deviceId
-    });
     void saveDesktopBindingState({
       bindings: nextDesktops,
       lastUsedDesktopId: nextDesktop.id
@@ -645,7 +696,7 @@ export default function App() {
     );
 
     if (shouldConnect) {
-      connectTo(nextDesktop.serverUrl, nextDesktop.deviceId);
+      connectToDesktop(nextDesktop);
     }
   };
 
@@ -662,7 +713,7 @@ export default function App() {
       setDesktopDrawerOpen(false);
       useTaskStore.getState().setScreen("confirmBinding");
       useTaskStore.getState().setError(undefined);
-      connectTo(desktop.serverUrl, desktop.deviceId);
+      connectToDesktop(desktop);
     } catch (error) {
       useTaskStore
         .getState()
@@ -689,20 +740,8 @@ export default function App() {
     setBoundDesktops(nextDesktops);
     setActiveBoundDesktopId(nextActiveDesktop?.id);
 
-    if (nextActiveDesktop) {
-      setServerUrlInput(nextActiveDesktop.serverUrl);
-      setDeviceIdInput(nextActiveDesktop.deviceId);
-      useTaskStore.getState().setConfig({
-        serverUrl: nextActiveDesktop.serverUrl,
-        deviceId: nextActiveDesktop.deviceId
-      });
-    } else if (activeBoundDesktopId === desktopIdToDelete) {
+    if (activeBoundDesktopId === desktopIdToDelete) {
       clientRef.current.disconnect();
-      setDeviceIdInput("");
-      useTaskStore.getState().setConfig({
-        serverUrl: serverUrlInput,
-        deviceId: ""
-      });
       useTaskStore.getState().setConnectionStatus("disconnected");
     }
 
@@ -747,7 +786,7 @@ export default function App() {
       setBindingConfirming(true);
       setPairingCodeError(undefined);
       clientRef.current.confirmDesktopBinding({
-        deviceId: pendingDesktop.deviceId,
+        deviceId: pendingDesktop.bindingToken,
         desktopId: pendingDesktop.desktopId,
         desktopName: pendingDesktop.desktopName,
         pairingCode,
@@ -764,6 +803,11 @@ export default function App() {
 
   const createTask = (input: { workspacePath: string; prompt: string; targetDesktopId?: string }) => {
     try {
+      const bindingToken = activeBoundDesktop?.bindingToken;
+      if (!bindingToken) {
+        throw new Error("Bind or select a desktop before creating a task");
+      }
+
       const now = new Date().toISOString();
       const taskId = createLocalTaskId();
       const targetDesktopId = input.targetDesktopId ?? activeBoundDesktop?.desktopId;
@@ -771,7 +815,7 @@ export default function App() {
         id: taskId,
         prompt: input.prompt,
         status: "created",
-        createdByDeviceId: useTaskStore.getState().deviceId,
+        createdByDeviceId: bindingToken,
         assignedDesktopDeviceId: targetDesktopId,
         createdAt: now,
         updatedAt: now,
@@ -780,7 +824,6 @@ export default function App() {
         }
       });
       clientRef.current.createTask({
-        deviceId: useTaskStore.getState().deviceId,
         targetDesktopId,
         requestId: taskId,
         workspacePath: input.workspacePath,
@@ -873,6 +916,58 @@ export default function App() {
       }
     ]);
   };
+
+  const renderUnboundHome = () => (
+    <View style={styles.unboundHome}>
+      <View style={styles.unboundTopBar}>
+        <View style={styles.unboundTopLeft}>
+          <HeaderDeviceIcon />
+          <View style={styles.unboundTitleBlock}>
+            <View style={styles.unboundTitleRow}>
+              <Text style={styles.unboundTopTitle}>未绑定设备</Text>
+              <View style={styles.unboundStatusDot} />
+              <Text style={styles.unboundStatusText}>离线</Text>
+            </View>
+            <Text style={styles.unboundTopSubtitle}>请先绑定设备以使用 Codex</Text>
+          </View>
+        </View>
+        <Pressable
+          accessibilityLabel="打开设备菜单"
+          accessibilityRole="button"
+          onPress={() => setDesktopDrawerOpen(true)}
+          style={styles.unboundMenuButton}
+        >
+          <MenuGlyph />
+        </Pressable>
+      </View>
+
+      <View style={styles.unboundCard}>
+        <View style={styles.unboundCardContent}>
+          <UnboundDeviceIllustration />
+          <Text style={styles.unboundCardTitle}>未绑定设备</Text>
+          <Text style={styles.unboundCardCopy}>
+            绑定后可查看命令记录、任务历史{"\n"}并在多设备间同步
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => useTaskStore.getState().setScreen("scanBinding")}
+            style={styles.unboundPrimaryButton}
+          >
+            <LinkGlyph light />
+            <Text style={styles.unboundPrimaryButtonText}>去绑定设备</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={openBindingHelp}
+            style={styles.unboundLearnButton}
+          >
+            <Text style={styles.unboundLearnText}>了解如何绑定</Text>
+            <Text style={styles.unboundLearnChevron}>›</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
 
   const renderScreen = () => {
     if (screen === "scanBinding") {
@@ -992,92 +1087,81 @@ export default function App() {
         <View style={styles.pageShell} {...panResponder.panHandlers}>
           <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
             <View style={styles.page}>
-              <View style={styles.connectionPanel}>
-                <View style={styles.connectionHeader}>
-                  <View>
-                    <Text style={sharedStyles.label}>Mobile</Text>
-                    <Text style={sharedStyles.title}>Personal AI Assistant</Text>
-                  </View>
-                  <View style={styles.statusBlock}>
-                    <Text style={sharedStyles.label}>Status</Text>
-                    <Text style={styles.connectionStatus}>{connectionStatus}</Text>
-                  </View>
-                </View>
+              {isUnboundHome ? (
+                renderUnboundHome()
+              ) : (
+                <>
+                  <View style={styles.connectionPanel}>
+                    <View style={styles.connectionHeader}>
+                      <View>
+                        <Text style={sharedStyles.label}>Mobile</Text>
+                        <Text style={sharedStyles.title}>Personal AI Assistant</Text>
+                      </View>
+                      <View style={styles.statusBlock}>
+                        <Text style={sharedStyles.label}>Status</Text>
+                        <Text style={styles.connectionStatus}>{connectionStatus}</Text>
+                      </View>
+                    </View>
 
-                <View style={styles.fieldRow}>
-                  <View style={styles.field}>
-                    <Text style={sharedStyles.label}>Server URL</Text>
-                    <TextInput
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      onChangeText={setServerUrlInput}
-                      placeholder="http://localhost:3000"
-                      style={sharedStyles.input}
-                      value={serverUrlInput}
-                    />
-                  </View>
-                  <View style={styles.field}>
-                    <Text style={sharedStyles.label}>Device ID</Text>
-                    <TextInput
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      onChangeText={setDeviceIdInput}
-                      placeholder="my-device"
-                      style={sharedStyles.input}
-                      value={deviceIdInput}
-                    />
-                  </View>
-                </View>
+                    <View style={styles.actions}>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => setDesktopDrawerOpen(true)}
+                        style={[sharedStyles.button, sharedStyles.buttonGhost]}
+                      >
+                        <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
+                          Desktops
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        disabled={!activeBoundDesktop}
+                        onPress={connect}
+                        style={[
+                          sharedStyles.button,
+                          !activeBoundDesktop ? styles.disabledButton : null
+                        ]}
+                      >
+                        <Text style={sharedStyles.buttonText}>
+                          {connectionStatus === "connected" ? "Reconnect" : "Connect"}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={disconnect}
+                        style={[sharedStyles.button, sharedStyles.buttonGhost]}
+                      >
+                        <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
+                          Disconnect
+                        </Text>
+                      </Pressable>
+                    </View>
 
-                <View style={styles.actions}>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => setDesktopDrawerOpen(true)}
-                    style={[sharedStyles.button, sharedStyles.buttonGhost]}
-                  >
-                    <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
-                      Desktops
+                    <Text style={styles.deviceText}>
+                      Active desktop: {activeBoundDesktop?.desktopName ?? "not selected"}
                     </Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={connect}
-                    style={sharedStyles.button}
-                  >
-                    <Text style={sharedStyles.buttonText}>
-                      {connectionStatus === "connected" ? "Reconnect" : "Connect"}
+                    {activeBoundDesktop ? (
+                      <Text numberOfLines={1} style={styles.deviceText}>
+                        Relay URL: {activeBoundDesktop.serverUrl}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.deviceText}>
+                      Online desktops:{" "}
+                      {availableDesktops.length > 0
+                        ? availableDesktops.map((desktop) => desktop.label).join(", ")
+                        : "none"}
                     </Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={disconnect}
-                    style={[sharedStyles.button, sharedStyles.buttonGhost]}
-                  >
-                    <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
-                      Disconnect
-                    </Text>
-                  </Pressable>
-                </View>
+                    {selectedTask ? (
+                      <Text style={styles.deviceText}>
+                        Selected task: {toDisplayTaskStatus(selectedTask.status)}
+                      </Text>
+                    ) : null}
+                    {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+                  </View>
 
-                <Text style={styles.deviceText}>Current deviceId: {deviceId || "not set"}</Text>
-                <Text style={styles.deviceText}>
-                  Active desktop: {activeBoundDesktop?.desktopName ?? "not selected"}
-                </Text>
-                <Text style={styles.deviceText}>
-                  Online desktops:{" "}
-                  {availableDesktops.length > 0
-                    ? availableDesktops.map((desktop) => desktop.label).join(", ")
-                    : "none"}
-                </Text>
-                {selectedTask ? (
-                  <Text style={styles.deviceText}>
-                    Selected task: {toDisplayTaskStatus(selectedTask.status)}
-                  </Text>
-                ) : null}
-                {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
-              </View>
-
-              <View style={styles.screen}>{renderScreen()}</View>
+                  <View style={styles.screen}>{renderScreen()}</View>
+                </>
+              )}
             </View>
           </TouchableWithoutFeedback>
           <BoundDesktopDrawer
@@ -1165,34 +1249,370 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700"
   },
-  field: {
-    gap: 6
+  alertBubble: {
+    alignItems: "center",
+    backgroundColor: "#6554e8",
+    borderRadius: 18,
+    bottom: 24,
+    height: 36,
+    justifyContent: "center",
+    position: "absolute",
+    right: 31,
+    elevation: 4,
+    shadowColor: "#6554e8",
+    shadowOffset: {
+      height: 6,
+      width: 0
+    },
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    width: 36
   },
-  fieldRow: {
-    gap: 10
+  alertBubbleText: {
+    color: "#ffffff",
+    fontSize: 19,
+    fontWeight: "500",
+    lineHeight: 22
+  },
+  headerIcon: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderColor: "#eef0fb",
+    borderRadius: 14,
+    borderWidth: 1,
+    height: 48,
+    justifyContent: "center",
+    elevation: 2,
+    shadowColor: "#7166a8",
+    shadowOffset: {
+      height: 6,
+      width: 0
+    },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    width: 48
+  },
+  headerMonitorBase: {
+    backgroundColor: "#8f8dad",
+    borderRadius: 2,
+    height: 3,
+    marginTop: 1,
+    width: 18
+  },
+  headerMonitorScreen: {
+    borderColor: "#8f8dad",
+    borderRadius: 4,
+    borderWidth: 3,
+    height: 20,
+    width: 26
+  },
+  headerMonitorStand: {
+    backgroundColor: "#8f8dad",
+    height: 5,
+    width: 4
+  },
+  heroLinkCircle: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderRadius: 24,
+    height: 48,
+    justifyContent: "center",
+    elevation: 2,
+    shadowColor: "#dcd8fb",
+    shadowOffset: {
+      height: 5,
+      width: 0
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    width: 48
+  },
+  heroMonitor: {
+    alignItems: "center",
+    borderColor: "#ded9ff",
+    borderRadius: 10,
+    borderWidth: 2,
+    height: 76,
+    justifyContent: "center",
+    left: 32,
+    position: "absolute",
+    top: 34,
+    width: 124
+  },
+  heroMonitorBase: {
+    backgroundColor: "#ded9ff",
+    borderRadius: 3,
+    height: 3,
+    left: 66,
+    position: "absolute",
+    top: 134,
+    width: 54
+  },
+  heroMonitorInner: {
+    alignItems: "center",
+    backgroundColor: "#faf9ff",
+    borderBottomColor: "#ded9ff",
+    borderBottomWidth: 2,
+    borderRadius: 10,
+    height: "100%",
+    justifyContent: "center",
+    width: "100%"
+  },
+  heroMonitorStem: {
+    borderBottomColor: "#ded9ff",
+    borderBottomWidth: 3,
+    borderLeftColor: "transparent",
+    borderLeftWidth: 6,
+    borderRightColor: "transparent",
+    borderRightWidth: 6,
+    height: 17,
+    left: 84,
+    position: "absolute",
+    top: 110,
+    width: 20
   },
   keyboard: {
     flex: 1
   },
+  linkGlyph: {
+    height: 18,
+    position: "relative",
+    width: 20
+  },
+  linkLoop: {
+    borderColor: "#6554e8",
+    borderRadius: 6,
+    borderWidth: 2,
+    height: 11,
+    position: "absolute",
+    top: 3,
+    transform: [{ rotate: "-38deg" }],
+    width: 12
+  },
+  linkLoopLeft: {
+    left: 2
+  },
+  linkLoopLight: {
+    borderColor: "#ffffff"
+  },
+  linkLoopRight: {
+    right: 2
+  },
+  menuGlyph: {
+    gap: 4,
+    width: 22
+  },
+  menuLine: {
+    backgroundColor: "#111827",
+    borderRadius: 2,
+    height: 2,
+    width: 22
+  },
   page: {
-    backgroundColor: colors.background,
+    backgroundColor: "#f8f9ff",
     flex: 1,
     padding: 16,
     paddingBottom: 28
   },
   pageShell: {
-    backgroundColor: colors.background,
+    backgroundColor: "#f8f9ff",
     flex: 1
   },
   safeArea: {
-    backgroundColor: colors.background,
+    backgroundColor: "#f8f9ff",
     flex: 1
   },
   screen: {
     flex: 1,
     paddingTop: 16
   },
+  sparkle: {
+    color: "#ded9fb",
+    fontSize: 19,
+    fontWeight: "700",
+    opacity: 0.72,
+    position: "absolute"
+  },
+  sparkleCircle: {
+    borderColor: "#ded9fb",
+    borderRadius: 5,
+    borderWidth: 2,
+    height: 10,
+    left: 84,
+    opacity: 0.72,
+    position: "absolute",
+    top: 0,
+    width: 10
+  },
+  sparkleDiamond: {
+    borderColor: "#ded9fb",
+    borderRadius: 3,
+    borderWidth: 2,
+    height: 8,
+    left: 10,
+    opacity: 0.72,
+    position: "absolute",
+    top: 80,
+    transform: [{ rotate: "45deg" }],
+    width: 8
+  },
+  sparkleLeft: {
+    left: 0,
+    top: 48
+  },
+  sparkleRight: {
+    right: 14,
+    top: 57
+  },
+  sparkleTopLeft: {
+    left: 28,
+    top: 4
+  },
+  sparkleTopRight: {
+    right: 40,
+    top: 8
+  },
   statusBlock: {
     alignItems: "flex-end"
+  },
+  unboundCard: {
+    backgroundColor: "#ffffff",
+    borderColor: "#f1f2fb",
+    borderRadius: 22,
+    borderWidth: 1,
+    flex: 1,
+    justifyContent: "center",
+    marginTop: 18,
+    paddingHorizontal: 20,
+    paddingVertical: 26,
+    elevation: 3,
+    shadowColor: "#ced3ee",
+    shadowOffset: {
+      height: 10,
+      width: 0
+    },
+    shadowOpacity: 0.11,
+    shadowRadius: 20
+  },
+  unboundCardContent: {
+    alignItems: "center",
+    gap: 10
+  },
+  unboundCardCopy: {
+    color: "#7a8197",
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: "center"
+  },
+  unboundCardTitle: {
+    color: "#111827",
+    fontSize: 19,
+    fontWeight: "800",
+    lineHeight: 25
+  },
+  unboundHome: {
+    flex: 1,
+    paddingTop: 4
+  },
+  unboundIllustration: {
+    height: 146,
+    marginBottom: 2,
+    position: "relative",
+    width: 188
+  },
+  unboundLearnButton: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    marginTop: 2,
+    minHeight: 34,
+    paddingHorizontal: 12
+  },
+  unboundLearnChevron: {
+    color: "#6554e8",
+    fontSize: 20,
+    lineHeight: 22
+  },
+  unboundLearnText: {
+    color: "#6554e8",
+    fontSize: 14,
+    fontWeight: "700"
+  },
+  unboundMenuButton: {
+    alignItems: "center",
+    height: 38,
+    justifyContent: "center",
+    width: 38
+  },
+  unboundPrimaryButton: {
+    alignItems: "center",
+    backgroundColor: "#6554e8",
+    borderRadius: 12,
+    flexDirection: "row",
+    gap: 9,
+    justifyContent: "center",
+    marginTop: 8,
+    maxWidth: "100%",
+    minHeight: 48,
+    minWidth: 190,
+    paddingHorizontal: 24,
+    elevation: 3,
+    shadowColor: "#6554e8",
+    shadowOffset: {
+      height: 6,
+      width: 0
+    },
+    shadowOpacity: 0.17,
+    shadowRadius: 12
+  },
+  unboundPrimaryButtonText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700"
+  },
+  unboundStatusDot: {
+    backgroundColor: "#9aa0b2",
+    borderRadius: 3.5,
+    height: 7,
+    marginLeft: 6,
+    width: 7
+  },
+  unboundStatusText: {
+    color: "#8b91a3",
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  unboundTitleBlock: {
+    flex: 1,
+    gap: 3
+  },
+  unboundTitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 5
+  },
+  unboundTopBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  unboundTopLeft: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 12
+  },
+  unboundTopSubtitle: {
+    color: "#7d8498",
+    fontSize: 13,
+    lineHeight: 18
+  },
+  unboundTopTitle: {
+    color: "#111827",
+    fontSize: 20,
+    fontWeight: "800",
+    lineHeight: 26
   }
 });

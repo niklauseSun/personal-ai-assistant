@@ -37,12 +37,11 @@ export interface MobileWebSocketHandlers {
 
 export interface MobileConnectOptions {
   serverUrl: string;
-  deviceId: string;
+  bindingToken: string;
   handlers: MobileWebSocketHandlers;
 }
 
 export interface CreateTaskInput {
-  deviceId: string;
   targetDesktopId?: string;
   requestId?: string;
   workspacePath: string;
@@ -60,12 +59,12 @@ export interface SubmitApprovalInput {
 export class MobileWebSocketClient {
   private socket?: Socket;
   private handlers?: MobileWebSocketHandlers;
-  private deviceId?: string;
+  private bindingToken?: string;
 
   connect(options: MobileConnectOptions) {
     this.disconnect();
     this.handlers = options.handlers;
-    this.deviceId = options.deviceId;
+    this.bindingToken = options.bindingToken;
     this.handlers.onConnectionStatus("connecting");
 
     const socket = io(this.namespaceUrl(options.serverUrl), {
@@ -87,8 +86,13 @@ export class MobileWebSocketClient {
   }
 
   createTask(input: CreateTaskInput) {
+    const bindingToken = this.bindingToken;
+    if (!bindingToken) {
+      throw new Error("Connect before creating a task");
+    }
+
     this.requireSocket().emit(WS_EVENTS.TASK_CREATE, {
-      deviceId: input.deviceId,
+      deviceId: bindingToken,
       targetDesktopId: input.targetDesktopId,
       requestId: input.requestId,
       prompt: input.prompt,
@@ -99,29 +103,29 @@ export class MobileWebSocketClient {
   }
 
   cancelTask(taskId: string, targetDesktopId?: string) {
-    const deviceId = this.deviceId;
-    if (!deviceId) {
+    const bindingToken = this.bindingToken;
+    if (!bindingToken) {
       throw new Error("Connect before cancelling a task");
     }
 
     this.requireSocket().emit(WS_EVENTS.TASK_CANCEL, {
       taskId,
-      deviceId,
+      deviceId: bindingToken,
       targetDesktopId,
       reason: "Cancelled from mobile"
     });
   }
 
   submitApproval(input: SubmitApprovalInput) {
-    const deviceId = this.deviceId;
-    if (!deviceId) {
+    const bindingToken = this.bindingToken;
+    if (!bindingToken) {
       throw new Error("Connect before submitting approval");
     }
 
     this.requireSocket().emit(WS_EVENTS.TASK_APPROVAL_SUBMIT, {
       taskId: input.taskId,
       approvalRequestId: input.approvalRequestId,
-      deviceId,
+      deviceId: bindingToken,
       targetDesktopId: input.targetDesktopId,
       decision: input.decision,
       reason: input.reason
@@ -134,14 +138,14 @@ export class MobileWebSocketClient {
 
   private registerHandlers(socket: Socket) {
     socket.on("connect", () => {
-      const deviceId = this.deviceId;
-      if (!deviceId) {
-        this.handlers?.onError("deviceId is required before connecting");
+      const bindingToken = this.bindingToken;
+      if (!bindingToken) {
+        this.handlers?.onError("A desktop binding is required before connecting");
         return;
       }
 
       socket.emit(WS_EVENTS.DEVICE_REGISTER, {
-        deviceId,
+        deviceId: bindingToken,
         clientType: "mobile"
       });
       this.handlers?.onConnectionStatus("connected");

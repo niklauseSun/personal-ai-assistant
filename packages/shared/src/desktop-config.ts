@@ -36,7 +36,7 @@ export interface DesktopPairingPayload {
 export interface MobileBoundDesktop {
   id: string;
   serverUrl: string;
-  deviceId: string;
+  bindingToken: string;
   desktopId: string;
   desktopName: string;
   createdAt: string;

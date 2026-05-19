@@ -26,7 +26,9 @@ export async function loadDesktopBindingState(): Promise<DesktopBindingState> {
 
   const record = parsed as Record<string, unknown>;
   const bindings = Array.isArray(record.bindings)
-    ? record.bindings.filter(isMobileBoundDesktop)
+    ? record.bindings
+        .map(normalizeMobileBoundDesktop)
+        .filter((binding): binding is MobileBoundDesktop => binding !== undefined)
     : [];
   const lastUsedDesktopId =
     typeof record.lastUsedDesktopId === "string" ? record.lastUsedDesktopId : undefined;
@@ -55,7 +57,7 @@ export function boundDesktopFromPairingPayload(payload: DesktopPairingPayload): 
   return {
     id: payload.desktopId,
     serverUrl: payload.serverUrl.trim().replace(/\/$/, ""),
-    deviceId: payload.deviceToken,
+    bindingToken: payload.deviceToken,
     desktopId: payload.desktopId,
     desktopName: payload.desktopName,
     createdAt: payload.createdAt,
@@ -74,21 +76,40 @@ export function upsertBoundDesktop(
   );
 }
 
-function isMobileBoundDesktop(value: unknown): value is MobileBoundDesktop {
+function normalizeMobileBoundDesktop(value: unknown): MobileBoundDesktop | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
+    return undefined;
   }
 
   const record = value as Record<string, unknown>;
-  return (
+  const bindingToken = isNonEmptyString(record.bindingToken)
+    ? record.bindingToken
+    : isNonEmptyString(record.deviceId)
+      ? record.deviceId
+      : undefined;
+
+  if (
     isNonEmptyString(record.id) &&
     isNonEmptyString(record.serverUrl) &&
-    isNonEmptyString(record.deviceId) &&
+    isNonEmptyString(bindingToken) &&
     isNonEmptyString(record.desktopId) &&
     isNonEmptyString(record.desktopName) &&
     isNonEmptyString(record.createdAt) &&
     isNonEmptyString(record.updatedAt)
-  );
+  ) {
+    return {
+      id: record.id,
+      serverUrl: record.serverUrl,
+      bindingToken,
+      desktopId: record.desktopId,
+      desktopName: record.desktopName,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      lastUsedAt: isNonEmptyString(record.lastUsedAt) ? record.lastUsedAt : undefined
+    };
+  }
+
+  return undefined;
 }
 
 function isNonEmptyString(value: unknown): value is string {

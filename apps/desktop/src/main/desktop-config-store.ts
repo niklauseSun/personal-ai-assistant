@@ -9,7 +9,7 @@ import type {
 } from "@personal-ai-assistant/shared";
 
 const CONFIG_FILE_NAME = "desktop-config.json";
-const DEFAULT_SERVER_URL = "http://localhost:3000";
+const DEFAULT_SERVER_URL = "http://122.51.133.4:3000";
 
 export class DesktopConfigStore {
   constructor(private readonly userDataPath: string) {}
