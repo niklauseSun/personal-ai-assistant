@@ -7,7 +7,11 @@ import {
   useCameraPermission,
   useCodeScanner
 } from "react-native-vision-camera";
-import { colors, sharedStyles } from "../ui/styles";
+import { AppHeader, IconButton } from "../ui/components";
+import { ChevronLeftIcon } from "../ui/icons";
+import { colors, radius, shadows, spacing, typography } from "../ui/theme";
+import { t } from "../ui/i18n";
+import { sharedStyles } from "../ui/styles";
 
 interface ScanBindingScreenProps {
   onBack: () => void;
@@ -26,7 +30,7 @@ export function ScanBindingScreen({ onBack, onScanned }: ScanBindingScreenProps)
   const submitManualValue = () => {
     const normalized = manualValue.trim();
     if (!normalized) {
-      Alert.alert("缺少绑定内容", "请先粘贴桌面端二维码中的绑定内容。");
+      Alert.alert(t.scan.manualMissingTitle, t.scan.manualMissingBody);
       return;
     }
 
@@ -59,7 +63,7 @@ export function ScanBindingScreen({ onBack, onScanned }: ScanBindingScreenProps)
     try {
       const granted = await requestPermission();
       if (!granted) {
-        setCameraError("未获得相机权限，请粘贴桌面端二维码内容完成绑定。");
+        setCameraError(t.scan.cameraErrorFallback);
       } else {
         setCameraError(undefined);
       }
@@ -83,17 +87,17 @@ export function ScanBindingScreen({ onBack, onScanned }: ScanBindingScreenProps)
   const renderCameraContent = () => {
     if (!hasPermission) {
       return (
-        <View style={[sharedStyles.card, styles.permissionCard]}>
-          <Text style={styles.cardTitle}>需要相机权限</Text>
-          <Text style={sharedStyles.muted}>允许访问相机后即可扫描桌面端绑定二维码。</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{t.scan.permissionTitle}</Text>
+          <Text style={styles.cardBody}>{t.scan.permissionHint}</Text>
           <Pressable
             accessibilityRole="button"
             disabled={isRequestingPermission}
             onPress={() => void requestCameraAccess()}
-            style={sharedStyles.button}
+            style={[sharedStyles.button, isRequestingPermission && styles.disabled]}
           >
             <Text style={sharedStyles.buttonText}>
-              {isRequestingPermission ? "请求中..." : "允许相机"}
+              {isRequestingPermission ? t.scan.requestingPermission : t.scan.grantCamera}
             </Text>
           </Pressable>
         </View>
@@ -102,11 +106,9 @@ export function ScanBindingScreen({ onBack, onScanned }: ScanBindingScreenProps)
 
     if (!device) {
       return (
-        <View style={[sharedStyles.card, styles.permissionCard]}>
-          <Text style={styles.cardTitle}>无法启动相机</Text>
-          <Text style={sharedStyles.muted}>
-            当前设备没有可用的后置摄像头，请粘贴二维码内容完成绑定。
-          </Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{t.scan.noCameraTitle}</Text>
+          <Text style={styles.cardBody}>{t.scan.noCameraHint}</Text>
         </View>
       );
     }
@@ -129,7 +131,7 @@ export function ScanBindingScreen({ onBack, onScanned }: ScanBindingScreenProps)
             onPress={scanAgain}
             style={[sharedStyles.button, sharedStyles.buttonGhost]}
           >
-            <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>重新扫描</Text>
+            <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>{t.scan.rescan}</Text>
           </Pressable>
         ) : null}
         {cameraError ? <Text style={styles.cameraError}>{cameraError}</Text> : null}
@@ -139,37 +141,36 @@ export function ScanBindingScreen({ onBack, onScanned }: ScanBindingScreenProps)
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <View>
-          <Text style={sharedStyles.label}>绑定</Text>
-          <Text style={sharedStyles.title}>扫描桌面端二维码</Text>
+      <AppHeader
+        title={t.scan.title}
+        subtitle={t.scan.subtitle}
+        actions={
+          <IconButton accessibilityLabel={t.scan.back} onPress={onBack}>
+            <ChevronLeftIcon size={22} color={colors.text} />
+          </IconButton>
+        }
+      />
+
+      <View style={styles.body}>
+        {renderCameraContent()}
+
+        <View style={styles.manualBlock}>
+          <Text style={styles.label}>{t.scan.manualLabel}</Text>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            multiline
+            onChangeText={setManualValue}
+            placeholder={t.scan.manualPlaceholder}
+            placeholderTextColor={colors.textSubtle}
+            style={[sharedStyles.input, styles.manualInput]}
+            textAlignVertical="top"
+            value={manualValue}
+          />
+          <Pressable accessibilityRole="button" onPress={submitManualValue} style={sharedStyles.button}>
+            <Text style={sharedStyles.buttonText}>{t.scan.manualSubmit}</Text>
+          </Pressable>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onBack}
-          style={[sharedStyles.button, sharedStyles.buttonGhost]}
-        >
-          <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>返回</Text>
-        </Pressable>
-      </View>
-
-      {renderCameraContent()}
-
-      <View style={styles.manualBlock}>
-        <Text style={sharedStyles.label}>手动绑定内容</Text>
-        <TextInput
-          autoCapitalize="none"
-          autoCorrect={false}
-          multiline
-          onChangeText={setManualValue}
-          placeholder="{...}"
-          style={[sharedStyles.input, styles.manualInput]}
-          textAlignVertical="top"
-          value={manualValue}
-        />
-        <Pressable accessibilityRole="button" onPress={submitManualValue} style={sharedStyles.button}>
-          <Text style={sharedStyles.buttonText}>使用文本绑定</Text>
-        </Pressable>
       </View>
     </View>
   );
@@ -177,59 +178,77 @@ export function ScanBindingScreen({ onBack, onScanned }: ScanBindingScreenProps)
 
 function toCameraErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) {
-    return `相机启动失败：${error.message}`;
+    return `${t.scan.cameraErrorPrefix}${error.message}`;
   }
 
-  return "相机启动失败，请粘贴二维码内容完成绑定。";
+  return t.scan.cameraErrorFallback;
 }
 
 const styles = StyleSheet.create({
+  body: {
+    flex: 1,
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg
+  },
+  cameraBlock: {
+    gap: spacing.md
+  },
+  cameraError: {
+    ...typography.caption,
+    color: colors.danger
+  },
   cameraFrame: {
-    backgroundColor: "#111827",
-    borderRadius: 8,
-    height: 360,
+    backgroundColor: "#0f172a",
+    borderRadius: radius.xl,
+    height: 320,
     overflow: "hidden"
   },
   cameraPreview: {
     ...StyleSheet.absoluteFillObject
   },
-  cameraBlock: {
-    gap: 10
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    gap: spacing.sm,
+    padding: spacing.lg,
+    ...shadows.card
   },
-  cameraError: {
-    color: colors.danger,
-    fontSize: 13
+  cardBody: {
+    ...typography.caption,
+    color: colors.textMuted
   },
   cardTitle: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: "700"
+    ...typography.sectionTitle
   },
   container: {
     flex: 1,
-    gap: 16
+    gap: spacing.md
   },
-  headerRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between"
+  disabled: {
+    opacity: 0.5
+  },
+  label: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontWeight: "600"
   },
   manualBlock: {
-    gap: 8
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    gap: spacing.sm,
+    padding: spacing.lg,
+    ...shadows.card
   },
   manualInput: {
-    minHeight: 92
-  },
-  permissionCard: {
-    gap: 12
+    minHeight: 96
   },
   scanFrame: {
     alignSelf: "center",
     borderColor: "#ffffff",
-    borderRadius: 8,
+    borderRadius: radius.lg,
     borderWidth: 3,
-    height: 220,
-    marginTop: 70,
-    width: 220
+    height: 200,
+    marginTop: 60,
+    width: 200
   }
 });

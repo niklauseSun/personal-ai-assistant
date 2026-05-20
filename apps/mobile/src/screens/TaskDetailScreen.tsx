@@ -4,9 +4,14 @@ import type {
   ApprovalRequest,
   OutputChunk
 } from "@personal-ai-assistant/shared";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { colors, sharedStyles } from "../ui/styles";
-import { statusColor, toDisplayTaskStatus } from "../utils/status";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { AppHeader, IconButton, StatusBadge } from "../ui/components";
+import { ChevronLeftIcon, RefreshIcon } from "../ui/icons";
+import { colors, radius, shadows, spacing, typography } from "../ui/theme";
+import { t } from "../ui/i18n";
+import { sharedStyles } from "../ui/styles";
+import { toDisplayTaskStatus } from "../utils/status";
+import { formatRelativeTimestamp } from "../utils/format";
 
 interface TaskDetailScreenProps {
   task: AgentTask | undefined;
@@ -41,15 +46,15 @@ export function TaskDetailScreen({
 }: TaskDetailScreenProps) {
   if (!task) {
     return (
-      <View style={styles.container}>
-        <Text style={sharedStyles.title}>Task not found</Text>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onBack}
-          style={[sharedStyles.button, sharedStyles.buttonGhost]}
-        >
-          <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>Back</Text>
-        </Pressable>
+      <View style={styles.notFound}>
+        <AppHeader
+          title={t.detail.title}
+          actions={
+            <IconButton accessibilityLabel={t.scan.back} onPress={onBack}>
+              <ChevronLeftIcon size={22} color={colors.text} />
+            </IconButton>
+          }
+        />
       </View>
     );
   }
@@ -59,118 +64,122 @@ export function TaskDetailScreen({
   const isPendingApproval = latestApproval?.status === "pending";
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerText}>
-          <Text style={sharedStyles.label}>Task detail</Text>
-          <Text numberOfLines={2} style={sharedStyles.title}>
-            {task.prompt || "Untitled task"}
-          </Text>
-          <Text style={[styles.status, { color: statusColor(displayStatus) }]}>
-            {displayStatus}
-          </Text>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onBack}
-          style={[sharedStyles.button, sharedStyles.buttonGhost]}
-        >
-          <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>Back</Text>
-        </Pressable>
-      </View>
+    <ScrollView
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
+      <AppHeader
+        title={t.detail.title}
+        actions={
+          <>
+            <IconButton accessibilityLabel={t.detail.refresh} onPress={() => onRefresh(task.id)}>
+              <RefreshIcon size={22} color={colors.text} />
+            </IconButton>
+            <IconButton accessibilityLabel={t.scan.back} onPress={onBack}>
+              <ChevronLeftIcon size={22} color={colors.text} />
+            </IconButton>
+          </>
+        }
+      />
 
-      <View style={styles.actions}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => onRefresh(task.id)}
-          style={[sharedStyles.button, sharedStyles.buttonGhost, styles.actionButton]}
-        >
-          <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>Refresh</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          disabled={!canCancel}
-          onPress={() => onCancel(task.id)}
-          style={[
-            sharedStyles.button,
-            sharedStyles.buttonDanger,
-            styles.actionButton,
-            !canCancel && styles.disabled
-          ]}
-        >
-          <Text style={sharedStyles.buttonText}>Cancel</Text>
-        </Pressable>
+      <View style={styles.padded}>
+        <View style={styles.summaryCard}>
+          <Text style={styles.label}>{t.detail.promptLabel}</Text>
+          <Text style={styles.prompt}>{task.prompt || "—"}</Text>
+          <View style={styles.metaRow}>
+            <StatusBadge status={displayStatus} />
+            <Text style={styles.meta}>{formatRelativeTimestamp(task.createdAt)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.actionsRow}>
+          <Pressable
+            accessibilityRole="button"
+            disabled={!canCancel}
+            onPress={() => onCancel(task.id)}
+            style={[
+              sharedStyles.button,
+              sharedStyles.buttonDanger,
+              styles.actionButton,
+              !canCancel && styles.disabled
+            ]}
+          >
+            <Text style={sharedStyles.buttonText}>
+              {canCancel ? t.detail.cancel : t.detail.cancelling}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       {latestApproval ? (
-        <View style={sharedStyles.card}>
-          <View style={styles.approvalHeader}>
-            <View style={styles.headerText}>
-              <Text style={sharedStyles.label}>Approval</Text>
-              <Text style={styles.approvalTitle}>{latestApproval.title}</Text>
+        <View style={styles.padded}>
+          <View style={styles.approvalCard}>
+            <View style={styles.approvalHeader}>
+              <Text style={styles.approvalTitle}>{latestApproval.title || t.detail.approvalTitle}</Text>
+              <Text style={styles.riskBadge}>{latestApproval.riskLevel}</Text>
             </View>
-            <Text style={styles.riskBadge}>{latestApproval.riskLevel}</Text>
+            <Text style={styles.approvalDescription}>
+              {latestApproval.description || latestApproval.message || ""}
+            </Text>
+            {isPendingApproval ? (
+              <View style={styles.actionsRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => onSubmitApproval(task.id, latestApproval.id, "approved")}
+                  style={[sharedStyles.button, styles.actionButton]}
+                >
+                  <Text style={sharedStyles.buttonText}>{t.detail.approve}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => onSubmitApproval(task.id, latestApproval.id, "rejected")}
+                  style={[sharedStyles.button, sharedStyles.buttonDanger, styles.actionButton]}
+                >
+                  <Text style={sharedStyles.buttonText}>{t.detail.reject}</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
-          <Text style={styles.approvalDescription}>
-            {latestApproval.description || latestApproval.message || "Approval required."}
-          </Text>
-          <Text style={sharedStyles.muted}>Status: {latestApproval.status}</Text>
-          {isPendingApproval ? (
-            <View style={styles.actions}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => onSubmitApproval(task.id, latestApproval.id, "approved")}
-                style={[sharedStyles.button, styles.actionButton]}
-              >
-                <Text style={sharedStyles.buttonText}>Approve</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => onSubmitApproval(task.id, latestApproval.id, "rejected")}
-                style={[sharedStyles.button, sharedStyles.buttonDanger, styles.actionButton]}
-              >
-                <Text style={sharedStyles.buttonText}>Reject</Text>
-              </Pressable>
-            </View>
-          ) : null}
         </View>
       ) : null}
 
-      <View style={outputs.length === 0 ? styles.emptyOutput : styles.outputList}>
+      <View style={styles.padded}>
+        <Text style={styles.sectionTitle}>{t.detail.outputTitle}</Text>
         {outputs.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No output yet</Text>
-            <Text style={sharedStyles.muted}>Output will appear as Codex writes stdout/stderr.</Text>
+          <View style={styles.emptyOutput}>
+            <Text style={styles.label}>{t.detail.outputEmpty}</Text>
           </View>
         ) : (
-          outputs.map((item) => (
-            <View key={item.id} style={styles.outputRow}>
-              <Text style={styles.stream}>{item.stream}</Text>
-              <Text selectable style={styles.outputText}>
-                {item.content}
-              </Text>
-            </View>
-          ))
+          <View style={styles.outputList}>
+            {outputs.map((item) => (
+              <View key={item.id} style={styles.outputRow}>
+                <Text style={styles.stream}>{item.stream}</Text>
+                <Text selectable style={styles.outputText}>
+                  {item.content}
+                </Text>
+              </View>
+            ))}
+            {hasMoreOutputs ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={isLoadingOutputs}
+                onPress={() => onLoadMoreOutputs(task.id)}
+                style={[
+                  sharedStyles.button,
+                  sharedStyles.buttonGhost,
+                  isLoadingOutputs && styles.disabled
+                ]}
+              >
+                <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
+                  {isLoadingOutputs ? t.detail.refreshing : t.detail.outputLoadMore}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
         )}
-        {hasMoreOutputs ? (
-          <Pressable
-            accessibilityRole="button"
-            disabled={isLoadingOutputs}
-            onPress={() => onLoadMoreOutputs(task.id)}
-            style={[
-              sharedStyles.button,
-              sharedStyles.buttonGhost,
-              styles.loadMoreButton,
-              isLoadingOutputs && styles.disabled
-            ]}
-          >
-            <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
-              {isLoadingOutputs ? "Loading..." : "Load more output"}
-            </Text>
-          </Pressable>
-        ) : null}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -178,96 +187,108 @@ const styles = StyleSheet.create({
   actionButton: {
     flex: 1
   },
-  actions: {
+  actionsRow: {
     flexDirection: "row",
-    gap: 10
+    gap: spacing.md
+  },
+  approvalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    gap: spacing.sm,
+    padding: spacing.lg,
+    ...shadows.card
   },
   approvalDescription: {
-    color: colors.text,
-    fontSize: 14,
-    lineHeight: 20
+    ...typography.body,
+    color: colors.text
   },
   approvalHeader: {
     alignItems: "flex-start",
     flexDirection: "row",
-    gap: 12,
-    justifyContent: "space-between",
-    marginBottom: 10
-  },
-  approvalTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: "700"
-  },
-  container: {
-    gap: 12
-  },
-  disabled: {
-    backgroundColor: "#9aa8b2"
-  },
-  emptyOutput: {
-    minHeight: 220,
-    justifyContent: "center"
-  },
-  emptyState: {
-    alignItems: "center",
-    gap: 8,
-    padding: 24
-  },
-  emptyTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "700"
-  },
-  headerRow: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: 12,
     justifyContent: "space-between"
   },
-  headerText: {
+  approvalTitle: {
+    ...typography.sectionTitle,
     flex: 1,
-    gap: 6
+    marginRight: spacing.md
   },
-  loadMoreButton: {
-    marginTop: 4
+  content: {
+    gap: spacing.md,
+    paddingBottom: 80
+  },
+  disabled: {
+    opacity: 0.5
+  },
+  emptyOutput: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    ...shadows.card
+  },
+  label: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontWeight: "600"
+  },
+  meta: {
+    ...typography.caption,
+    color: colors.textMuted
+  },
+  metaRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.xs
+  },
+  notFound: {
+    flex: 1
   },
   outputList: {
-    gap: 8,
-    paddingBottom: 24
+    gap: spacing.sm
   },
   outputRow: {
-    backgroundColor: "#111827",
-    borderRadius: 8,
-    padding: 12
+    backgroundColor: colors.terminalBg,
+    borderRadius: radius.lg,
+    padding: spacing.md
   },
   outputText: {
-    color: "#e5e7eb",
-    fontFamily: "Courier",
-    fontSize: 13,
+    ...typography.mono,
+    color: colors.terminalText,
     lineHeight: 18
   },
+  padded: {
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg
+  },
+  prompt: {
+    ...typography.body,
+    color: colors.text,
+    marginTop: spacing.xs
+  },
   riskBadge: {
-    backgroundColor: "#fff7ed",
-    borderColor: "#fed7aa",
-    borderRadius: 8,
-    borderWidth: 1,
-    color: "#9a3412",
-    fontSize: 12,
-    fontWeight: "700",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    ...typography.micro,
+    backgroundColor: colors.statusPendingSoft,
+    borderRadius: radius.pill,
+    color: colors.statusPending,
+    overflow: "hidden",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
     textTransform: "uppercase"
   },
-  status: {
-    fontSize: 13,
-    fontWeight: "700"
+  sectionTitle: {
+    ...typography.sectionTitle
   },
   stream: {
+    ...typography.micro,
     color: "#93c5fd",
-    fontSize: 11,
-    fontWeight: "700",
-    marginBottom: 6,
+    marginBottom: spacing.xs,
     textTransform: "uppercase"
+  },
+  summaryCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    gap: spacing.xs,
+    padding: spacing.lg,
+    ...shadows.card
   }
 });

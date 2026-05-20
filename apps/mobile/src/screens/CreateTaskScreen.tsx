@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { colors, sharedStyles } from "../ui/styles";
+import { AppHeader, FloatingActionButton, IconButton } from "../ui/components";
+import { ChevronLeftIcon } from "../ui/icons";
+import { colors, radius, spacing, typography } from "../ui/theme";
+import { t } from "../ui/i18n";
+import { sharedStyles } from "../ui/styles";
 
 export interface DesktopTargetOption {
   desktopId: string;
@@ -40,17 +44,17 @@ export function CreateTaskScreen({
 
   const run = () => {
     if (!workspacePath.trim()) {
-      Alert.alert("Missing workspace", "Enter the desktop workspace path.");
+      Alert.alert(t.create.workspace, t.create.workspacePlaceholder);
       return;
     }
 
     if (!prompt.trim()) {
-      Alert.alert("Missing prompt", "Enter a prompt for Codex.");
+      Alert.alert(t.create.prompt, t.create.promptPlaceholder);
       return;
     }
 
     if (availableDesktops.length > 0 && !selectedDesktopId) {
-      Alert.alert("Choose a desktop", "Select which desktop should run Codex.");
+      Alert.alert(t.create.desktop, t.create.desktopEmpty);
       return;
     }
 
@@ -64,133 +68,132 @@ export function CreateTaskScreen({
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <View>
-          <Text style={sharedStyles.label}>Create</Text>
-          <Text style={sharedStyles.title}>Run Codex</Text>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onBack}
-          style={[sharedStyles.button, sharedStyles.buttonGhost]}
-        >
-          <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>Back</Text>
-        </Pressable>
-      </View>
+      <AppHeader
+        title={t.create.title}
+        subtitle={t.create.subtitle}
+        actions={
+          <IconButton accessibilityLabel={t.create.back} onPress={onBack}>
+            <ChevronLeftIcon size={22} color={colors.text} />
+          </IconButton>
+        }
+      />
 
-      <View style={styles.field}>
-        <Text style={sharedStyles.label}>Desktop</Text>
-        {availableDesktops.length === 0 ? (
-          <Text style={sharedStyles.muted}>
-            No desktop is online yet. You can still run with legacy broadcast routing.
-          </Text>
-        ) : (
-          <View style={styles.desktopList}>
-            {availableDesktops.map((desktop) => {
-              const isSelected = desktop.desktopId === selectedDesktopId;
+      <View style={styles.body}>
+        <View style={styles.field}>
+          <Text style={styles.label}>{t.create.desktop}</Text>
+          {availableDesktops.length === 0 ? (
+            <Text style={styles.helper}>{t.create.desktopEmpty}</Text>
+          ) : (
+            <View style={styles.chipsRow}>
+              {availableDesktops.map((desktop) => {
+                const isSelected = desktop.desktopId === selectedDesktopId;
 
-              return (
-                <Pressable
-                  accessibilityRole="button"
-                  key={desktop.desktopId}
-                  onPress={() => setSelectedDesktopId(desktop.desktopId)}
-                  style={[styles.desktopOption, isSelected && styles.desktopOptionSelected]}
-                >
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.desktopOptionText,
-                      isSelected && styles.desktopOptionTextSelected
-                    ]}
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    key={desktop.desktopId}
+                    onPress={() => setSelectedDesktopId(desktop.desktopId)}
+                    style={[styles.chip, isSelected && styles.chipActive]}
                   >
-                    {desktop.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.chipText, isSelected && styles.chipTextActive]}
+                    >
+                      {desktop.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.label}>{t.create.workspace}</Text>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={setWorkspacePath}
+            placeholder={t.create.workspacePlaceholder}
+            placeholderTextColor={colors.textSubtle}
+            style={styles.input}
+            value={workspacePath}
+          />
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.label}>{t.create.prompt}</Text>
+          <TextInput
+            multiline
+            onChangeText={setPrompt}
+            placeholder={t.create.promptPlaceholder}
+            placeholderTextColor={colors.textSubtle}
+            style={[styles.input, styles.promptInput]}
+            textAlignVertical="top"
+            value={prompt}
+          />
+        </View>
       </View>
 
-      <View style={styles.field}>
-        <Text style={sharedStyles.label}>Workspace path</Text>
-        <TextInput
-          autoCapitalize="none"
-          autoCorrect={false}
-          onChangeText={setWorkspacePath}
-          placeholder="/Users/me/code/project"
-          style={sharedStyles.input}
-          value={workspacePath}
-        />
-      </View>
-
-      <View style={styles.field}>
-        <Text style={sharedStyles.label}>Prompt</Text>
-        <TextInput
-          multiline
-          onChangeText={setPrompt}
-          placeholder="Describe the coding task..."
-          style={[sharedStyles.input, styles.promptInput]}
-          textAlignVertical="top"
-          value={prompt}
-        />
-      </View>
-
-      <Pressable
-        accessibilityRole="button"
-        disabled={!canRun}
-        onPress={run}
-        style={[sharedStyles.button, !canRun && styles.disabled]}
-      >
-        <Text style={sharedStyles.buttonText}>{canRun ? "Run" : "Connect first"}</Text>
-      </Pressable>
+      <FloatingActionButton
+        accessibilityLabel={t.create.run}
+        label={canRun ? t.create.run : t.create.running}
+        onPress={canRun ? run : () => undefined}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    gap: 16,
-    paddingBottom: 24
+  body: {
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg
   },
-  disabled: {
-    backgroundColor: "#9aa8b2"
+  chip: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2
   },
-  desktopList: {
+  chipActive: {
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primarySoft
+  },
+  chipText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontWeight: "600"
+  },
+  chipTextActive: {
+    color: colors.primary
+  },
+  chipsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8
+    gap: spacing.sm
   },
-  desktopOption: {
-    backgroundColor: colors.background,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    maxWidth: "100%",
-    paddingHorizontal: 12,
-    paddingVertical: 9
-  },
-  desktopOptionSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary
-  },
-  desktopOptionText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: "700"
-  },
-  desktopOptionTextSelected: {
-    color: "#ffffff"
+  container: {
+    flex: 1,
+    gap: spacing.md
   },
   field: {
-    gap: 8
+    gap: spacing.xs
   },
-  headerRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between"
+  helper: {
+    ...typography.caption,
+    color: colors.textMuted
+  },
+  input: {
+    ...sharedStyles.input
+  },
+  label: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontWeight: "600"
   },
   promptInput: {
-    minHeight: 180
+    minHeight: 160
   }
 });

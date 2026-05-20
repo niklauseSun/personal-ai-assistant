@@ -19,6 +19,7 @@
     "react": "^19.0.0",
     "react-native": "^0.79.0",
     "react-native-reanimated": "~3.17.5",
+    "react-native-svg": "^15.15.5",
     "react-native-vision-camera": "^4.7.2",
     "socket.io-client": "^4.8.3",
     "zustand": "^5.0.13"

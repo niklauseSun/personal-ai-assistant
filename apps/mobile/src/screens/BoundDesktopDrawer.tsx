@@ -1,6 +1,9 @@
 import type { MobileBoundDesktop } from "@personal-ai-assistant/shared";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { colors, sharedStyles } from "../ui/styles";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { IconButton } from "../ui/components";
+import { CloseIcon, MonitorIcon, ScanIcon, TrashIcon } from "../ui/icons";
+import { colors, radius, shadows, spacing, typography } from "../ui/theme";
+import { t } from "../ui/i18n";
 
 export interface DesktopPresence {
   status: "online" | "offline";
@@ -36,153 +39,219 @@ export function BoundDesktopDrawer({
     <View style={styles.backdrop}>
       <Pressable accessibilityRole="button" onPress={onClose} style={styles.scrim} />
       <View style={styles.drawer}>
+        <View style={styles.handle} />
         <View style={styles.headerRow}>
-          <View>
-            <Text style={sharedStyles.label}>Desktops</Text>
-            <Text style={styles.title}>Bound desktops</Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            onPress={onClose}
-            style={[sharedStyles.button, sharedStyles.buttonGhost, styles.smallButton]}
-          >
-            <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>Close</Text>
-          </Pressable>
+          <Text style={styles.title}>{t.drawer.title}</Text>
+          <IconButton accessibilityLabel={t.drawer.close} onPress={onClose}>
+            <CloseIcon size={22} color={colors.text} />
+          </IconButton>
         </View>
 
-        <Pressable accessibilityRole="button" onPress={onScan} style={sharedStyles.button}>
-          <Text style={sharedStyles.buttonText}>Scan desktop QR</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onScan}
+          style={({ pressed }) => [styles.scanCta, pressed && styles.pressed]}
+        >
+          <ScanIcon size={20} color="#ffffff" />
+          <Text style={styles.scanCtaText}>{t.drawer.scanCta}</Text>
         </Pressable>
 
-        <View style={styles.list}>
+        <ScrollView
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+        >
           {desktops.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No desktop bound</Text>
-              <Text style={sharedStyles.muted}>Scan a desktop QR code to add one.</Text>
+              <Text style={styles.emptyTitle}>{t.drawer.empty}</Text>
             </View>
           ) : (
             desktops.map((desktop) => {
               const isActive = desktop.id === activeDesktopId;
               const presence = desktopPresenceById[desktop.desktopId];
-              const status = presence?.status ?? "offline";
+              const isOnline = presence?.status === "online";
 
               return (
                 <View
                   key={desktop.id}
-                  style={[sharedStyles.card, styles.desktopCard, isActive && styles.activeCard]}
+                  style={[styles.deviceCard, isActive && styles.deviceCardActive]}
                 >
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => onSelect(desktop)}
-                    style={styles.desktopInfo}
+                    style={styles.deviceInfo}
                   >
-                    <Text style={styles.desktopName}>{desktop.desktopName}</Text>
-                    <Text numberOfLines={1} style={sharedStyles.muted}>
-                      {desktop.serverUrl}
-                    </Text>
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        styles.presenceText,
-                        status === "online" ? styles.onlineText : styles.offlineText
-                      ]}
-                    >
-                      {status === "online" ? "Online" : "Offline"}
-                      {presence
-                        ? ` - Last seen ${new Date(presence.lastSeenAt).toLocaleString()}`
-                        : ""}
-                    </Text>
+                    <View style={styles.iconWrap}>
+                      <MonitorIcon size={20} color={isActive ? colors.primary : colors.textMuted} />
+                    </View>
+                    <View style={styles.deviceText}>
+                      <View style={styles.deviceNameRow}>
+                        <Text numberOfLines={1} style={styles.deviceName}>
+                          {desktop.desktopName}
+                        </Text>
+                        <View style={[styles.dot, { backgroundColor: isOnline ? colors.online : colors.offline }]} />
+                        <Text style={[styles.presence, isOnline ? styles.online : styles.offline]}>
+                          {isOnline ? t.device.online : t.device.offline}
+                        </Text>
+                      </View>
+                      <Text numberOfLines={1} style={styles.deviceUrl}>
+                        {desktop.serverUrl}
+                      </Text>
+                      {isActive ? (
+                        <Text style={styles.activeLabel}>{t.drawer.active}</Text>
+                      ) : null}
+                    </View>
                   </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
+                  <IconButton
+                    accessibilityLabel={t.drawer.delete}
                     onPress={() => onDelete(desktop.id)}
-                    style={[sharedStyles.button, sharedStyles.buttonDanger, styles.smallButton]}
                   >
-                    <Text style={sharedStyles.buttonText}>Delete</Text>
-                  </Pressable>
+                    <TrashIcon size={20} color={colors.danger} />
+                  </IconButton>
                 </View>
               );
             })
           )}
-        </View>
+        </ScrollView>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  activeCard: {
-    borderColor: colors.primary,
-    borderWidth: 2
+  activeLabel: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: "600"
   },
   backdrop: {
     bottom: 0,
     flexDirection: "row",
+    justifyContent: "flex-end",
     left: 0,
     position: "absolute",
     right: 0,
     top: 0,
     zIndex: 10
   },
-  desktopCard: {
-    gap: 10
+  deviceCard: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    padding: spacing.md
   },
-  desktopInfo: {
-    gap: 5
+  deviceCardActive: {
+    borderColor: colors.primary,
+    borderWidth: 2
   },
-  desktopName: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: "700"
+  deviceInfo: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: spacing.md
+  },
+  deviceName: {
+    ...typography.bodyStrong,
+    flexShrink: 1
+  },
+  deviceNameRow: {
+    alignItems: "center",
+    flexDirection: "row"
+  },
+  deviceText: {
+    flex: 1,
+    gap: 2
+  },
+  deviceUrl: {
+    ...typography.caption,
+    color: colors.textMuted
+  },
+  dot: {
+    borderRadius: radius.pill,
+    height: 7,
+    marginLeft: spacing.sm,
+    width: 7
   },
   drawer: {
-    backgroundColor: colors.background,
-    borderLeftColor: colors.border,
-    borderLeftWidth: 1,
-    gap: 14,
-    padding: 16,
-    width: "84%"
+    backgroundColor: colors.surface,
+    borderBottomLeftRadius: radius.xl,
+    borderTopLeftRadius: radius.xl,
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
+    width: "84%",
+    ...shadows.card
   },
   emptyState: {
     alignItems: "center",
-    gap: 8,
-    padding: 24
+    padding: spacing.xl
   },
   emptyTitle: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: "700"
+    ...typography.body,
+    color: colors.textMuted
+  },
+  handle: {
+    alignSelf: "center",
+    backgroundColor: colors.border,
+    borderRadius: radius.pill,
+    height: 4,
+    marginBottom: spacing.sm,
+    width: 40
   },
   headerRow: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between"
   },
+  iconWrap: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.md,
+    height: 36,
+    justifyContent: "center",
+    width: 36
+  },
   list: {
-    gap: 10
+    gap: spacing.sm,
+    paddingBottom: spacing.lg
   },
-  offlineText: {
-    color: colors.muted
+  offline: {
+    color: colors.textSubtle
   },
-  onlineText: {
-    color: colors.primary
+  online: {
+    color: colors.online
   },
-  presenceText: {
-    fontSize: 12,
-    fontWeight: "700"
+  presence: {
+    ...typography.caption,
+    fontWeight: "600",
+    marginLeft: 4
+  },
+  pressed: {
+    opacity: 0.85
+  },
+  scanCta: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: radius.lg,
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "center",
+    minHeight: 48,
+    paddingHorizontal: spacing.lg
+  },
+  scanCtaText: {
+    ...typography.bodyStrong,
+    color: "#ffffff"
   },
   scrim: {
     backgroundColor: "rgba(15, 23, 42, 0.36)",
     flex: 1
   },
-  smallButton: {
-    minHeight: 38,
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
   title: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "700"
+    ...typography.sectionTitle
   }
 });

@@ -1,30 +1,33 @@
 import { StyleSheet } from "react-native";
+import { colors as themeColors, radius, spacing, typography } from "./theme";
+
+export { radius, spacing, typography } from "./theme";
 
 export const colors = {
-  background: "#f5f7fb",
-  border: "#d7dde8",
-  danger: "#b42318",
-  muted: "#5f6b7a",
-  primary: "#25636f",
-  surface: "#ffffff",
-  text: "#1f2937"
-};
+  background: themeColors.bg,
+  border: themeColors.border,
+  danger: themeColors.danger,
+  muted: themeColors.textMuted,
+  primary: themeColors.primary,
+  surface: themeColors.surface,
+  text: themeColors.text
+} as const;
 
 export const sharedStyles = StyleSheet.create({
   button: {
     alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    minHeight: 44,
+    backgroundColor: themeColors.primary,
+    borderRadius: radius.md,
     justifyContent: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10
+    minHeight: 48,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md
   },
   buttonDanger: {
-    backgroundColor: colors.danger
+    backgroundColor: themeColors.danger
   },
   buttonGhost: {
-    backgroundColor: "#eef3f6"
+    backgroundColor: themeColors.primarySoft
   },
   buttonText: {
     color: "#ffffff",
@@ -32,45 +35,44 @@ export const sharedStyles = StyleSheet.create({
     fontWeight: "700"
   },
   buttonTextGhost: {
-    color: colors.primary
+    color: themeColors.primary
   },
   card: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
+    backgroundColor: themeColors.surface,
+    borderColor: themeColors.border,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    padding: 14
+    padding: spacing.lg
   },
   input: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
+    backgroundColor: themeColors.surface,
+    borderColor: themeColors.border,
+    borderRadius: radius.md,
     borderWidth: 1,
-    color: colors.text,
+    color: themeColors.text,
     fontSize: 15,
-    minHeight: 44,
-    paddingHorizontal: 12,
-    paddingVertical: 10
+    minHeight: 48,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md
   },
   label: {
-    color: colors.muted,
+    color: themeColors.textMuted,
     fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 0,
+    fontWeight: "600",
+    letterSpacing: 0.4,
     textTransform: "uppercase"
   },
   muted: {
-    color: colors.muted
+    ...typography.caption,
+    color: themeColors.textMuted
   },
   row: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 10
+    gap: spacing.md
   },
   title: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: "700",
-    lineHeight: 28
+    ...typography.title,
+    lineHeight: 30
   }
 });

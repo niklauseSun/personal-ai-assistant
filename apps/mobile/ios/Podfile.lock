@@ -8,7 +8,7 @@ PODS:
   - hermes-engine (0.79.7):
     - hermes-engine/Pre-built (= 0.79.7)
   - hermes-engine/Pre-built (0.79.7)
-  - op-sqlite (16.0.0):
+  - op-sqlite (16.1.0):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -1826,12 +1826,61 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
+  - RNSVG (15.15.5):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - RNSVG/common (= 15.15.5)
+    - Yoga
+  - RNSVG/common (15.15.5):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
   - SocketRocket (0.7.1)
-  - VisionCamera (4.7.2):
-    - VisionCamera/Core (= 4.7.2)
-    - VisionCamera/React (= 4.7.2)
-  - VisionCamera/Core (4.7.2)
-  - VisionCamera/React (4.7.2):
+  - VisionCamera (4.7.3):
+    - VisionCamera/Core (= 4.7.3)
+    - VisionCamera/React (= 4.7.3)
+  - VisionCamera/Core (4.7.3)
+  - VisionCamera/React (4.7.3):
     - React-Core
   - Yoga (0.0.0)
 
@@ -1910,6 +1959,7 @@ DEPENDENCIES:
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - "RNCAsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)"
   - RNReanimated (from `../node_modules/react-native-reanimated`)
+  - RNSVG (from `../node_modules/react-native-svg`)
   - VisionCamera (from `../node_modules/react-native-vision-camera`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
@@ -2063,6 +2113,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/@react-native-async-storage/async-storage"
   RNReanimated:
     :path: "../node_modules/react-native-reanimated"
+  RNSVG:
+    :path: "../node_modules/react-native-svg"
   VisionCamera:
     :path: "../node_modules/react-native-vision-camera"
   Yoga:
@@ -2076,7 +2128,7 @@ SPEC CHECKSUMS:
   fmt: a40bb5bd0294ea969aaaba240a927bd33d878cdd
   glog: 5683914934d5b6e4240e497e0f4a3b42d1854183
   hermes-engine: 13c84524b3b6e884b2cf3b3b1e002ffd147d88a3
-  op-sqlite: cc1c0af891c8bc780b35800c2247e8c44b746883
+  op-sqlite: ec6f54dc8a6b1f9fbb0cbb4651cf70738dc9a8b2
   RCT-Folly: e78785aa9ba2ed998ea4151e314036f6c49e6d82
   RCTDeprecation: b9b1716eec53aaeaa859aa45e27de7b615cff732
   RCTRequired: 862acb469086f601f81aab298e00c2a13d572099
@@ -2137,12 +2189,13 @@ SPEC CHECKSUMS:
   React-timing: 10c2421a49f1c2906d6bb95027248a4543ac113f
   React-utils: 9ec29e69f3e6347a4c93745f84c2a214b5b1ce64
   ReactAppDependencyProvider: b203bace11326361b7f0513b3f5854cd340aa929
-  ReactCodegen: 8e165164b56f133e25517d50a142814b760a3266
+  ReactCodegen: 6a29ad4365aeeceecb951cfd6546a99ce617cc50
   ReactCommon: 4e460daed3ccb6af9e3de3176920362d8b888a17
   RNCAsyncStorage: 39c42c1e478e1f5166d1db52b5055e090e85ad66
-  RNReanimated: 2ac66dea59102a3ff2438d9b1c2eac3bb4f19ba7
+  RNReanimated: 2313402fe27fecb7237619e9c6fcee3177f08a65
+  RNSVG: 7f5a3429d6fdf2dda10f28111ef332b5261451b6
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
-  VisionCamera: 30b358b807324c692064f78385e9a732ce1bebfe
+  VisionCamera: 7187b3dac1ff3071234ead959ce311875748e14f
   Yoga: 9663a18d096f7f7e17a535cf00849db756709955
 
 PODFILE CHECKSUM: 07275c56e746c6ea13a7ec6d28e88d3fc951e74c

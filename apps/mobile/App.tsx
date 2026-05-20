@@ -1,6 +1,5 @@
 import type {
   AgentTask,
-  AgentTaskStatus,
   DeviceSession,
   MobileBoundDesktop,
   MobileDeviceInfo
@@ -14,20 +13,18 @@ import {
   NativeModules,
   PanResponder,
   Platform,
-  Pressable,
   SafeAreaView,
   StyleSheet,
-  Text,
-  TextInput,
   TouchableWithoutFeedback,
   View
 } from "react-native";
 import { MobileWebSocketClient } from "./src/api/mobile-websocket-client";
 import { BoundDesktopDrawer } from "./src/screens/BoundDesktopDrawer";
 import { CreateTaskScreen } from "./src/screens/CreateTaskScreen";
+import { HomeScreen } from "./src/screens/HomeScreen";
+import { PairingCodeScreen } from "./src/screens/PairingCodeScreen";
 import { ScanBindingScreen } from "./src/screens/ScanBindingScreen";
 import { TaskDetailScreen } from "./src/screens/TaskDetailScreen";
-import { TaskListScreen } from "./src/screens/TaskListScreen";
 import {
   boundDesktopFromPairingPayload,
   loadDesktopBindingState,
@@ -37,14 +34,14 @@ import {
 } from "./src/store/desktop-binding-storage";
 import { loadTaskHistoryFromDatabase } from "./src/store/task-history-db";
 import { useTaskStore } from "./src/store/task-store";
-import { colors, sharedStyles } from "./src/ui/styles";
-import { toDisplayTaskStatus } from "./src/utils/status";
+import { FloatingActionButton } from "./src/ui/components";
+import { t } from "./src/ui/i18n";
+import { colors } from "./src/ui/theme";
+import type { StatusFilterValue } from "./src/ui/components";
 
 export interface HistoryFilters {
-  status: AgentTaskStatus | "all";
+  status: StatusFilterValue;
   prompt: string;
-  createdFrom: string;
-  createdTo: string;
 }
 
 interface OutputPageState {
@@ -68,8 +65,6 @@ function filterLocalTasks(
   desktopId: string | undefined
 ) {
   const normalizedPrompt = filters.prompt.trim().toLowerCase();
-  const createdFrom = parseOptionalTime(filters.createdFrom);
-  const createdTo = parseOptionalTime(filters.createdTo);
 
   return tasks.filter((task) => {
     if (bindingToken && task.createdByDeviceId !== bindingToken) {
@@ -84,35 +79,19 @@ function filterLocalTasks(
       return false;
     }
 
-    if (filters.status !== "all" && task.status !== filters.status) {
-      return false;
+    if (filters.status !== "all") {
+      const status = task.status === "started" ? "running" : task.status === "queued" ? "created" : task.status;
+      if (status !== filters.status) {
+        return false;
+      }
     }
 
     if (normalizedPrompt && !task.prompt.toLowerCase().includes(normalizedPrompt)) {
       return false;
     }
 
-    const createdAt = Date.parse(task.createdAt);
-    if (createdFrom !== undefined && createdAt < createdFrom) {
-      return false;
-    }
-
-    if (createdTo !== undefined && createdAt > createdTo) {
-      return false;
-    }
-
     return true;
   });
-}
-
-function parseOptionalTime(value: string) {
-  const normalized = value.trim();
-  if (!normalized) {
-    return undefined;
-  }
-
-  const time = Date.parse(normalized);
-  return Number.isNaN(time) ? undefined : time;
 }
 
 function getMobileDeviceInfo(): MobileDeviceInfo {
@@ -168,139 +147,6 @@ function firstNativeString(...values: unknown[]) {
   return undefined;
 }
 
-interface PairingCodeScreenProps {
-  code: string;
-  connectionStatus: string;
-  desktop?: MobileBoundDesktop;
-  error?: string;
-  isSubmitting: boolean;
-  onBack: () => void;
-  onCodeChange: (value: string) => void;
-  onSubmit: () => void;
-}
-
-function PairingCodeScreen({
-  code,
-  connectionStatus,
-  desktop,
-  error,
-  isSubmitting,
-  onBack,
-  onCodeChange,
-  onSubmit
-}: PairingCodeScreenProps) {
-  const canSubmit = code.length === 6 && connectionStatus === "connected" && !isSubmitting;
-
-  return (
-    <View style={styles.confirmBindingPanel}>
-      <View style={styles.connectionHeader}>
-        <View>
-          <Text style={sharedStyles.label}>Bind</Text>
-          <Text style={sharedStyles.title}>Confirm code</Text>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onBack}
-          style={[sharedStyles.button, sharedStyles.buttonGhost]}
-        >
-          <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>Back</Text>
-        </Pressable>
-      </View>
-
-      <View style={sharedStyles.card}>
-        <Text style={styles.confirmDesktopName}>{desktop?.desktopName ?? "Desktop"}</Text>
-        <Text style={sharedStyles.muted}>{desktop?.serverUrl ?? "No relay URL from desktop"}</Text>
-        <Text style={styles.deviceText}>Relay status: {connectionStatus}</Text>
-      </View>
-
-      <View style={styles.codeBlock}>
-        <Text style={sharedStyles.label}>Pairing code</Text>
-        <TextInput
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="number-pad"
-          maxLength={6}
-          onChangeText={onCodeChange}
-          placeholder="000000"
-          style={[sharedStyles.input, styles.codeInput, error ? styles.codeInputError : null]}
-          value={code}
-        />
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-      </View>
-
-      <Pressable
-        accessibilityRole="button"
-        disabled={!canSubmit}
-        onPress={onSubmit}
-        style={[sharedStyles.button, !canSubmit ? styles.disabledButton : null]}
-      >
-        <Text style={sharedStyles.buttonText}>
-          {isSubmitting ? "Confirming..." : "Confirm binding"}
-        </Text>
-      </Pressable>
-    </View>
-  );
-}
-
-function HeaderDeviceIcon() {
-  return (
-    <View style={styles.headerIcon}>
-      <View style={styles.headerMonitorScreen} />
-      <View style={styles.headerMonitorStand} />
-      <View style={styles.headerMonitorBase} />
-    </View>
-  );
-}
-
-function MenuGlyph() {
-  return (
-    <View style={styles.menuGlyph}>
-      <View style={styles.menuLine} />
-      <View style={styles.menuLine} />
-      <View style={styles.menuLine} />
-    </View>
-  );
-}
-
-function LinkGlyph({ light = false }: { light?: boolean }) {
-  return (
-    <View style={styles.linkGlyph}>
-      <View
-        style={[styles.linkLoop, light ? styles.linkLoopLight : null, styles.linkLoopLeft]}
-      />
-      <View
-        style={[styles.linkLoop, light ? styles.linkLoopLight : null, styles.linkLoopRight]}
-      />
-    </View>
-  );
-}
-
-function UnboundDeviceIllustration() {
-  return (
-    <View style={styles.unboundIllustration}>
-      <Text style={[styles.sparkle, styles.sparkleTopLeft]}>+</Text>
-      <Text style={[styles.sparkle, styles.sparkleTopRight]}>+</Text>
-      <Text style={[styles.sparkle, styles.sparkleLeft]}>+</Text>
-      <Text style={[styles.sparkle, styles.sparkleRight]}>+</Text>
-      <View style={styles.sparkleCircle} />
-      <View style={styles.sparkleDiamond} />
-
-      <View style={styles.heroMonitor}>
-        <View style={styles.heroMonitorInner}>
-          <View style={styles.heroLinkCircle}>
-            <LinkGlyph />
-          </View>
-        </View>
-      </View>
-      <View style={styles.heroMonitorStem} />
-      <View style={styles.heroMonitorBase} />
-      <View style={styles.alertBubble}>
-        <Text style={styles.alertBubbleText}>!</Text>
-      </View>
-    </View>
-  );
-}
-
 export default function App() {
   const clientRef = useRef(new MobileWebSocketClient());
   const boundDesktopsRef = useRef<MobileBoundDesktop[]>([]);
@@ -320,9 +166,7 @@ export default function App() {
 
   const [historyFilters, setHistoryFilters] = useState<HistoryFilters>({
     status: "all",
-    prompt: "",
-    createdFrom: "",
-    createdTo: ""
+    prompt: ""
   });
   const [outputPages, setOutputPages] = useState<Record<string, OutputPageState>>({});
   const [desktopSessions, setDesktopSessions] = useState<DeviceSession[]>([]);
@@ -362,7 +206,7 @@ export default function App() {
         if (isMounted) {
           useTaskStore
             .getState()
-            .setError(error instanceof Error ? error.message : "Failed to load SQLite history");
+            .setError(error instanceof Error ? error.message : "Failed to load history");
         }
       })
       .finally(() => {
@@ -409,10 +253,10 @@ export default function App() {
     };
   }, []);
 
-  const tasks = useMemo(() => taskIds.map((taskId) => tasksById[taskId]).filter(Boolean), [
-    taskIds,
-    tasksById
-  ]);
+  const tasks = useMemo(
+    () => taskIds.map((taskId) => tasksById[taskId]).filter(Boolean),
+    [taskIds, tasksById]
+  );
   const selectedTask = selectedTaskId ? tasksById[selectedTaskId] : undefined;
   const selectedOutputs = selectedTaskId ? outputsByTaskId[selectedTaskId] ?? [] : [];
   const selectedApprovals = selectedTaskId ? approvalsByTaskId[selectedTaskId] ?? [] : [];
@@ -421,29 +265,26 @@ export default function App() {
     () => boundDesktops.find((desktop) => desktop.id === activeBoundDesktopId),
     [activeBoundDesktopId, boundDesktops]
   );
-  const availableDesktops = useMemo(
-    () => {
-      const byId = new Map<string, { desktopId: string; label: string }>();
-      for (const session of desktopSessions) {
-        if (session.status !== "online") {
-          continue;
-        }
-
-        const desktopId = getDesktopId(session);
-        if (!desktopId) {
-          continue;
-        }
-
-        byId.set(desktopId, {
-          desktopId,
-          label: session.deviceName ?? desktopId
-        });
+  const availableDesktops = useMemo(() => {
+    const byId = new Map<string, { desktopId: string; label: string }>();
+    for (const session of desktopSessions) {
+      if (session.status !== "online") {
+        continue;
       }
 
-      return Array.from(byId.values());
-    },
-    [desktopSessions]
-  );
+      const desktopId = getDesktopId(session);
+      if (!desktopId) {
+        continue;
+      }
+
+      byId.set(desktopId, {
+        desktopId,
+        label: session.deviceName ?? desktopId
+      });
+    }
+
+    return Array.from(byId.values());
+  }, [desktopSessions]);
   const desktopPresenceById = useMemo(() => {
     const presenceById: Record<string, { status: "online" | "offline"; lastSeenAt: string }> = {};
     for (const session of desktopSessions) {
@@ -460,6 +301,10 @@ export default function App() {
 
     return presenceById;
   }, [desktopSessions]);
+  const activeDesktopOnline = activeBoundDesktop
+    ? desktopPresenceById[activeBoundDesktop.desktopId]?.status === "online" ||
+      connectionStatus === "connected"
+    : false;
   const visibleTasks = useMemo(
     () =>
       filterLocalTasks(
@@ -492,15 +337,13 @@ export default function App() {
   const canCancel = selectedTask
     ? ["created", "running", "started", "waiting_approval"].includes(selectedTask.status)
     : false;
-  const isUnboundHome =
-    !isLoadingDesktopBindings && boundDesktops.length === 0 && screen === "tasks";
 
   const updatePendingScannedDesktop = (desktop: MobileBoundDesktop | undefined) => {
     pendingScannedDesktopRef.current = desktop;
     setPendingScannedDesktop(desktop);
   };
 
-  const applyLocalHistoryFilters = () => {
+  const refreshHistory = () => {
     useTaskStore.getState().setHistoryLoading(false);
     useTaskStore.getState().setError(undefined);
   };
@@ -524,36 +367,18 @@ export default function App() {
         isLoading: false
       }
     }));
-    useTaskStore.getState().setError("All output is already loaded from local history.");
-  };
-
-  const connect = () => {
-    if (!activeBoundDesktop) {
-      Alert.alert("No desktop selected", "Bind or select a desktop before connecting.");
-      return;
-    }
-
-    connectToDesktop(activeBoundDesktop);
   };
 
   const openBindingHelp = () => {
-    Alert.alert(
-      "如何绑定设备",
-      "在桌面端生成绑定二维码，然后使用手机扫描二维码完成绑定。"
-    );
+    Alert.alert("如何绑定设备", "在桌面端生成绑定二维码，然后使用手机扫描二维码完成绑定。");
   };
 
   const connectToDesktop = (desktop: MobileBoundDesktop) => {
     const normalizedServerUrl = desktop.serverUrl.trim();
     const bindingToken = desktop.bindingToken.trim();
 
-    if (!normalizedServerUrl) {
-      Alert.alert("Missing relay URL", "This desktop binding does not include a relay URL.");
-      return;
-    }
-
-    if (!bindingToken) {
-      Alert.alert("Invalid desktop binding", "Scan the desktop QR code again.");
+    if (!normalizedServerUrl || !bindingToken) {
+      useTaskStore.getState().setError("缺少桌面端绑定信息，请重新扫码绑定。");
       return;
     }
 
@@ -588,10 +413,7 @@ export default function App() {
             payload.session.deviceId === pendingDesktop.bindingToken
           ) {
             useTaskStore.getState().setError(undefined);
-            return;
           }
-
-          applyLocalHistoryFilters();
         },
         onError: (message) => useTaskStore.getState().setError(message),
         onTask: (task) => useTaskStore.getState().upsertTask(task),
@@ -670,11 +492,6 @@ export default function App() {
     });
   };
 
-  const disconnect = () => {
-    clientRef.current.disconnect();
-    useTaskStore.getState().setConnectionStatus("disconnected");
-  };
-
   const selectBoundDesktop = (desktop: MobileBoundDesktop, shouldConnect = true) => {
     const nextDesktop = {
       ...desktop,
@@ -722,10 +539,10 @@ export default function App() {
   };
 
   const deleteBoundDesktop = (desktopIdToDelete: string) => {
-    Alert.alert("Delete desktop", "This desktop will need to be bound again before reuse.", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t.alert.confirmDeleteTitle, t.alert.confirmDeleteBody, [
+      { text: t.alert.cancel, style: "cancel" },
       {
-        text: "Delete",
+        text: t.alert.confirm,
         style: "destructive",
         onPress: () => void deleteBoundDesktopNow(desktopIdToDelete)
       }
@@ -763,17 +580,17 @@ export default function App() {
     const pairingCode = pairingCodeInput.trim();
 
     if (!pendingDesktop) {
-      setPairingCodeError("Scan the desktop QR code again.");
+      setPairingCodeError("请重新扫描桌面端二维码。");
       return;
     }
 
     if (!/^\d{6}$/.test(pairingCode)) {
-      setPairingCodeError("Enter the 6-digit pairing code.");
+      setPairingCodeError("请输入 6 位数字验证码。");
       return;
     }
 
     if (connectionStatus !== "connected") {
-      setPairingCodeError("Mobile is still connecting to the desktop relay.");
+      setPairingCodeError("正在连接桌面端，请稍候。");
       return;
     }
 
@@ -793,7 +610,7 @@ export default function App() {
         mobileDevice: getMobileDeviceInfo(),
         confirmedAt: new Date().toISOString()
       });
-      useTaskStore.getState().setError("Waiting for desktop to confirm binding.");
+      useTaskStore.getState().setError("等待桌面端确认绑定...");
     } catch (error) {
       hasSentBindingConfirmRef.current = false;
       setBindingConfirming(false);
@@ -805,7 +622,7 @@ export default function App() {
     try {
       const bindingToken = activeBoundDesktop?.bindingToken;
       if (!bindingToken) {
-        throw new Error("Bind or select a desktop before creating a task");
+        throw new Error("请先绑定或选择一个桌面端再创建任务");
       }
 
       const now = new Date().toISOString();
@@ -881,94 +698,6 @@ export default function App() {
     }
   };
 
-  const clearHistory = () => {
-    if (visibleTasks.length === 0) {
-      Alert.alert("No local records", "There are no task records to clear.");
-      return;
-    }
-
-    Alert.alert(
-      "Clear local records",
-      "This removes the task records currently shown on this phone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: clearHistoryNow
-        }
-      ]
-    );
-  };
-
-  const clearHistoryNow = () => {
-    useTaskStore.getState().clearTasks(visibleTasks.map((task) => task.id));
-    useTaskStore.getState().setError(undefined);
-  };
-
-  const deleteTask = (taskId: string) => {
-    Alert.alert("Delete local task", "This removes the task record from this phone.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => useTaskStore.getState().deleteTask(taskId)
-      }
-    ]);
-  };
-
-  const renderUnboundHome = () => (
-    <View style={styles.unboundHome}>
-      <View style={styles.unboundTopBar}>
-        <View style={styles.unboundTopLeft}>
-          <HeaderDeviceIcon />
-          <View style={styles.unboundTitleBlock}>
-            <View style={styles.unboundTitleRow}>
-              <Text style={styles.unboundTopTitle}>未绑定设备</Text>
-              <View style={styles.unboundStatusDot} />
-              <Text style={styles.unboundStatusText}>离线</Text>
-            </View>
-            <Text style={styles.unboundTopSubtitle}>请先绑定设备以使用 Codex</Text>
-          </View>
-        </View>
-        <Pressable
-          accessibilityLabel="打开设备菜单"
-          accessibilityRole="button"
-          onPress={() => setDesktopDrawerOpen(true)}
-          style={styles.unboundMenuButton}
-        >
-          <MenuGlyph />
-        </Pressable>
-      </View>
-
-      <View style={styles.unboundCard}>
-        <View style={styles.unboundCardContent}>
-          <UnboundDeviceIllustration />
-          <Text style={styles.unboundCardTitle}>未绑定设备</Text>
-          <Text style={styles.unboundCardCopy}>
-            绑定后可查看命令记录、任务历史{"\n"}并在多设备间同步
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => useTaskStore.getState().setScreen("scanBinding")}
-            style={styles.unboundPrimaryButton}
-          >
-            <LinkGlyph light />
-            <Text style={styles.unboundPrimaryButtonText}>去绑定设备</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={openBindingHelp}
-            style={styles.unboundLearnButton}
-          >
-            <Text style={styles.unboundLearnText}>了解如何绑定</Text>
-            <Text style={styles.unboundLearnChevron}>›</Text>
-          </Pressable>
-        </View>
-      </View>
-    </View>
-  );
-
   const renderScreen = () => {
     if (screen === "scanBinding") {
       return (
@@ -1033,50 +762,31 @@ export default function App() {
       );
     }
 
-    if (isLoadingDesktopBindings) {
-      return (
-        <View style={styles.emptyBindingPanel}>
-          <Text style={sharedStyles.label}>Desktops</Text>
-          <Text style={styles.emptyBindingTitle}>Loading desktop bindings</Text>
-          <Text style={sharedStyles.muted}>Checking the last desktop you used.</Text>
-        </View>
-      );
-    }
-
-    if (boundDesktops.length === 0) {
-      return (
-        <View style={styles.emptyBindingPanel}>
-          <Text style={sharedStyles.label}>Desktops</Text>
-          <Text style={styles.emptyBindingTitle}>No desktop bound</Text>
-          <Text style={sharedStyles.muted}>
-            Bind a desktop before creating or viewing Codex tasks.
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => useTaskStore.getState().setScreen("scanBinding")}
-            style={sharedStyles.button}
-          >
-            <Text style={sharedStyles.buttonText}>Bind desktop</Text>
-          </Pressable>
-        </View>
-      );
-    }
-
     return (
-      <TaskListScreen
-        filters={historyFilters}
-        isLoading={isLoadingHistory}
-        onApplyFilters={applyLocalHistoryFilters}
-        onClearHistory={clearHistory}
+      <HomeScreen
+        activeDesktop={activeBoundDesktop}
+        desktopOnline={activeDesktopOnline}
+        errorMessage={errorMessage}
+        isLoadingHistory={isLoadingHistory || isLoadingDesktopBindings}
+        mobileLabel={undefined}
+        onBindingHelp={openBindingHelp}
         onCreate={() => useTaskStore.getState().setScreen("create")}
-        onDeleteTask={deleteTask}
-        onFiltersChange={setHistoryFilters}
+        onOpenDrawer={() => setDesktopDrawerOpen(true)}
         onOpenTask={openTask}
-        onRefresh={applyLocalHistoryFilters}
+        onRefresh={refreshHistory}
+        onScan={() => useTaskStore.getState().setScreen("scanBinding")}
+        onSearchChange={(value) => setHistoryFilters((state) => ({ ...state, prompt: value }))}
+        onStatusFilterChange={(value) =>
+          setHistoryFilters((state) => ({ ...state, status: value }))
+        }
+        searchText={historyFilters.prompt}
+        statusFilter={historyFilters.status}
         tasks={visibleTasks}
       />
     );
   };
+
+  const showFab = screen === "tasks" && Boolean(activeBoundDesktop);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1086,84 +796,15 @@ export default function App() {
       >
         <View style={styles.pageShell} {...panResponder.panHandlers}>
           <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
-            <View style={styles.page}>
-              {isUnboundHome ? (
-                renderUnboundHome()
-              ) : (
-                <>
-                  <View style={styles.connectionPanel}>
-                    <View style={styles.connectionHeader}>
-                      <View>
-                        <Text style={sharedStyles.label}>Mobile</Text>
-                        <Text style={sharedStyles.title}>Personal AI Assistant</Text>
-                      </View>
-                      <View style={styles.statusBlock}>
-                        <Text style={sharedStyles.label}>Status</Text>
-                        <Text style={styles.connectionStatus}>{connectionStatus}</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.actions}>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => setDesktopDrawerOpen(true)}
-                        style={[sharedStyles.button, sharedStyles.buttonGhost]}
-                      >
-                        <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
-                          Desktops
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        disabled={!activeBoundDesktop}
-                        onPress={connect}
-                        style={[
-                          sharedStyles.button,
-                          !activeBoundDesktop ? styles.disabledButton : null
-                        ]}
-                      >
-                        <Text style={sharedStyles.buttonText}>
-                          {connectionStatus === "connected" ? "Reconnect" : "Connect"}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={disconnect}
-                        style={[sharedStyles.button, sharedStyles.buttonGhost]}
-                      >
-                        <Text style={[sharedStyles.buttonText, sharedStyles.buttonTextGhost]}>
-                          Disconnect
-                        </Text>
-                      </Pressable>
-                    </View>
-
-                    <Text style={styles.deviceText}>
-                      Active desktop: {activeBoundDesktop?.desktopName ?? "not selected"}
-                    </Text>
-                    {activeBoundDesktop ? (
-                      <Text numberOfLines={1} style={styles.deviceText}>
-                        Relay URL: {activeBoundDesktop.serverUrl}
-                      </Text>
-                    ) : null}
-                    <Text style={styles.deviceText}>
-                      Online desktops:{" "}
-                      {availableDesktops.length > 0
-                        ? availableDesktops.map((desktop) => desktop.label).join(", ")
-                        : "none"}
-                    </Text>
-                    {selectedTask ? (
-                      <Text style={styles.deviceText}>
-                        Selected task: {toDisplayTaskStatus(selectedTask.status)}
-                      </Text>
-                    ) : null}
-                    {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
-                  </View>
-
-                  <View style={styles.screen}>{renderScreen()}</View>
-                </>
-              )}
-            </View>
+            <View style={styles.page}>{renderScreen()}</View>
           </TouchableWithoutFeedback>
+          {showFab ? (
+            <FloatingActionButton
+              accessibilityLabel={t.create.fabLabel}
+              label={t.create.fabLabel}
+              onPress={() => useTaskStore.getState().setScreen("create")}
+            />
+          ) : null}
           <BoundDesktopDrawer
             activeDesktopId={activeBoundDesktopId}
             desktopPresenceById={desktopPresenceById}
@@ -1184,435 +825,19 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  actions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10
-  },
-  connectionHeader: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    justifyContent: "space-between"
-  },
-  connectionPanel: {
-    backgroundColor: colors.background,
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
-    gap: 12,
-    paddingBottom: 14
-  },
-  connectionStatus: {
-    color: colors.primary,
-    fontSize: 15,
-    fontWeight: "700",
-    textAlign: "right"
-  },
-  codeBlock: {
-    gap: 8
-  },
-  codeInput: {
-    fontSize: 28,
-    fontWeight: "700",
-    letterSpacing: 0,
-    textAlign: "center"
-  },
-  codeInputError: {
-    borderColor: colors.danger
-  },
-  confirmBindingPanel: {
-    gap: 16
-  },
-  confirmDesktopName: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 6
-  },
-  deviceText: {
-    color: colors.muted,
-    fontSize: 13
-  },
-  disabledButton: {
-    opacity: 0.55
-  },
-  emptyBindingPanel: {
-    gap: 10,
-    paddingVertical: 24
-  },
-  emptyBindingTitle: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "700"
-  },
-  error: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: "700"
-  },
-  alertBubble: {
-    alignItems: "center",
-    backgroundColor: "#6554e8",
-    borderRadius: 18,
-    bottom: 24,
-    height: 36,
-    justifyContent: "center",
-    position: "absolute",
-    right: 31,
-    elevation: 4,
-    shadowColor: "#6554e8",
-    shadowOffset: {
-      height: 6,
-      width: 0
-    },
-    shadowOpacity: 0.16,
-    shadowRadius: 12,
-    width: 36
-  },
-  alertBubbleText: {
-    color: "#ffffff",
-    fontSize: 19,
-    fontWeight: "500",
-    lineHeight: 22
-  },
-  headerIcon: {
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderColor: "#eef0fb",
-    borderRadius: 14,
-    borderWidth: 1,
-    height: 48,
-    justifyContent: "center",
-    elevation: 2,
-    shadowColor: "#7166a8",
-    shadowOffset: {
-      height: 6,
-      width: 0
-    },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    width: 48
-  },
-  headerMonitorBase: {
-    backgroundColor: "#8f8dad",
-    borderRadius: 2,
-    height: 3,
-    marginTop: 1,
-    width: 18
-  },
-  headerMonitorScreen: {
-    borderColor: "#8f8dad",
-    borderRadius: 4,
-    borderWidth: 3,
-    height: 20,
-    width: 26
-  },
-  headerMonitorStand: {
-    backgroundColor: "#8f8dad",
-    height: 5,
-    width: 4
-  },
-  heroLinkCircle: {
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderRadius: 24,
-    height: 48,
-    justifyContent: "center",
-    elevation: 2,
-    shadowColor: "#dcd8fb",
-    shadowOffset: {
-      height: 5,
-      width: 0
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    width: 48
-  },
-  heroMonitor: {
-    alignItems: "center",
-    borderColor: "#ded9ff",
-    borderRadius: 10,
-    borderWidth: 2,
-    height: 76,
-    justifyContent: "center",
-    left: 32,
-    position: "absolute",
-    top: 34,
-    width: 124
-  },
-  heroMonitorBase: {
-    backgroundColor: "#ded9ff",
-    borderRadius: 3,
-    height: 3,
-    left: 66,
-    position: "absolute",
-    top: 134,
-    width: 54
-  },
-  heroMonitorInner: {
-    alignItems: "center",
-    backgroundColor: "#faf9ff",
-    borderBottomColor: "#ded9ff",
-    borderBottomWidth: 2,
-    borderRadius: 10,
-    height: "100%",
-    justifyContent: "center",
-    width: "100%"
-  },
-  heroMonitorStem: {
-    borderBottomColor: "#ded9ff",
-    borderBottomWidth: 3,
-    borderLeftColor: "transparent",
-    borderLeftWidth: 6,
-    borderRightColor: "transparent",
-    borderRightWidth: 6,
-    height: 17,
-    left: 84,
-    position: "absolute",
-    top: 110,
-    width: 20
-  },
   keyboard: {
     flex: 1
   },
-  linkGlyph: {
-    height: 18,
-    position: "relative",
-    width: 20
-  },
-  linkLoop: {
-    borderColor: "#6554e8",
-    borderRadius: 6,
-    borderWidth: 2,
-    height: 11,
-    position: "absolute",
-    top: 3,
-    transform: [{ rotate: "-38deg" }],
-    width: 12
-  },
-  linkLoopLeft: {
-    left: 2
-  },
-  linkLoopLight: {
-    borderColor: "#ffffff"
-  },
-  linkLoopRight: {
-    right: 2
-  },
-  menuGlyph: {
-    gap: 4,
-    width: 22
-  },
-  menuLine: {
-    backgroundColor: "#111827",
-    borderRadius: 2,
-    height: 2,
-    width: 22
-  },
   page: {
-    backgroundColor: "#f8f9ff",
-    flex: 1,
-    padding: 16,
-    paddingBottom: 28
+    backgroundColor: colors.bg,
+    flex: 1
   },
   pageShell: {
-    backgroundColor: "#f8f9ff",
+    backgroundColor: colors.bg,
     flex: 1
   },
   safeArea: {
-    backgroundColor: "#f8f9ff",
+    backgroundColor: colors.bg,
     flex: 1
-  },
-  screen: {
-    flex: 1,
-    paddingTop: 16
-  },
-  sparkle: {
-    color: "#ded9fb",
-    fontSize: 19,
-    fontWeight: "700",
-    opacity: 0.72,
-    position: "absolute"
-  },
-  sparkleCircle: {
-    borderColor: "#ded9fb",
-    borderRadius: 5,
-    borderWidth: 2,
-    height: 10,
-    left: 84,
-    opacity: 0.72,
-    position: "absolute",
-    top: 0,
-    width: 10
-  },
-  sparkleDiamond: {
-    borderColor: "#ded9fb",
-    borderRadius: 3,
-    borderWidth: 2,
-    height: 8,
-    left: 10,
-    opacity: 0.72,
-    position: "absolute",
-    top: 80,
-    transform: [{ rotate: "45deg" }],
-    width: 8
-  },
-  sparkleLeft: {
-    left: 0,
-    top: 48
-  },
-  sparkleRight: {
-    right: 14,
-    top: 57
-  },
-  sparkleTopLeft: {
-    left: 28,
-    top: 4
-  },
-  sparkleTopRight: {
-    right: 40,
-    top: 8
-  },
-  statusBlock: {
-    alignItems: "flex-end"
-  },
-  unboundCard: {
-    backgroundColor: "#ffffff",
-    borderColor: "#f1f2fb",
-    borderRadius: 22,
-    borderWidth: 1,
-    flex: 1,
-    justifyContent: "center",
-    marginTop: 18,
-    paddingHorizontal: 20,
-    paddingVertical: 26,
-    elevation: 3,
-    shadowColor: "#ced3ee",
-    shadowOffset: {
-      height: 10,
-      width: 0
-    },
-    shadowOpacity: 0.11,
-    shadowRadius: 20
-  },
-  unboundCardContent: {
-    alignItems: "center",
-    gap: 10
-  },
-  unboundCardCopy: {
-    color: "#7a8197",
-    fontSize: 13,
-    lineHeight: 20,
-    textAlign: "center"
-  },
-  unboundCardTitle: {
-    color: "#111827",
-    fontSize: 19,
-    fontWeight: "800",
-    lineHeight: 25
-  },
-  unboundHome: {
-    flex: 1,
-    paddingTop: 4
-  },
-  unboundIllustration: {
-    height: 146,
-    marginBottom: 2,
-    position: "relative",
-    width: 188
-  },
-  unboundLearnButton: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "center",
-    marginTop: 2,
-    minHeight: 34,
-    paddingHorizontal: 12
-  },
-  unboundLearnChevron: {
-    color: "#6554e8",
-    fontSize: 20,
-    lineHeight: 22
-  },
-  unboundLearnText: {
-    color: "#6554e8",
-    fontSize: 14,
-    fontWeight: "700"
-  },
-  unboundMenuButton: {
-    alignItems: "center",
-    height: 38,
-    justifyContent: "center",
-    width: 38
-  },
-  unboundPrimaryButton: {
-    alignItems: "center",
-    backgroundColor: "#6554e8",
-    borderRadius: 12,
-    flexDirection: "row",
-    gap: 9,
-    justifyContent: "center",
-    marginTop: 8,
-    maxWidth: "100%",
-    minHeight: 48,
-    minWidth: 190,
-    paddingHorizontal: 24,
-    elevation: 3,
-    shadowColor: "#6554e8",
-    shadowOffset: {
-      height: 6,
-      width: 0
-    },
-    shadowOpacity: 0.17,
-    shadowRadius: 12
-  },
-  unboundPrimaryButtonText: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "700"
-  },
-  unboundStatusDot: {
-    backgroundColor: "#9aa0b2",
-    borderRadius: 3.5,
-    height: 7,
-    marginLeft: 6,
-    width: 7
-  },
-  unboundStatusText: {
-    color: "#8b91a3",
-    fontSize: 12,
-    fontWeight: "700"
-  },
-  unboundTitleBlock: {
-    flex: 1,
-    gap: 3
-  },
-  unboundTitleRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 5
-  },
-  unboundTopBar: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between"
-  },
-  unboundTopLeft: {
-    alignItems: "center",
-    flex: 1,
-    flexDirection: "row",
-    gap: 12
-  },
-  unboundTopSubtitle: {
-    color: "#7d8498",
-    fontSize: 13,
-    lineHeight: 18
-  },
-  unboundTopTitle: {
-    color: "#111827",
-    fontSize: 20,
-    fontWeight: "800",
-    lineHeight: 26
   }
 });
