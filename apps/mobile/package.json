@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "main": "index.js",
+  "packageManager": "yarn@1.22.22",
   "scripts": {
     "android": "react-native run-android",
     "check:animations": "node scripts/check-no-react-native-animated.mjs",
     "ios": "react-native run-ios",
     "start": "react-native start",
-    "typecheck": "pnpm check:animations && tsc --noEmit -p tsconfig.json"
+    "typecheck": "yarn check:animations && tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@babel/runtime": "^7.29.2",

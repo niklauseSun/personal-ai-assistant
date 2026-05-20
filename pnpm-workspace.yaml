@@ -1,5 +1,6 @@
 packages:
   - "apps/*"
+  - "!apps/mobile"
   - "packages/*"
 allowBuilds:
   '@nestjs/core': false

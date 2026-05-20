@@ -19,6 +19,25 @@ pnpm dev:server
 
 The server listens on `http://localhost:3000` and exposes `GET /health`.
 
+## Mobile Install
+
+`apps/mobile` is excluded from the pnpm workspace and uses **yarn** (`yarn@1.22.x`)
+for its dependencies. The mobile app consumes `@personal-ai-assistant/shared`
+through a `file:` reference to `packages/shared/dist`, so build shared first.
+
+```bash
+pnpm install --filter @personal-ai-assistant/shared...
+pnpm --filter @personal-ai-assistant/shared build
+
+cd apps/mobile
+yarn install
+
+# iOS only
+cd ios && bundle install && bundle exec pod install
+```
+
+Do not run `pnpm install` inside `apps/mobile`.
+
 ## Server Database
 
 `apps/server` uses PostgreSQL through Prisma. For local development:
@@ -44,7 +63,7 @@ Server tests use `TEST_DATABASE_URL`. The provided compose file exposes the test
 
 For React Native animation code, use `react-native-reanimated`. Do not import or require
 `Animated` from `react-native`. The mobile `typecheck` script runs
-`pnpm check:animations` to enforce this rule.
+`yarn check:animations` to enforce this rule.
 
 ## Architecture Notes
 
