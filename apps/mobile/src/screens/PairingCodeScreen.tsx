@@ -27,7 +27,7 @@ export function PairingCodeScreen({
   onCodeChange,
   onSubmit
 }: PairingCodeScreenProps) {
-  const canSubmit = code.length === 6 && connectionStatus === "connected" && !isSubmitting;
+  const canSubmit = code.length === 6 && !isSubmitting;
 
   return (
     <View style={styles.container}>

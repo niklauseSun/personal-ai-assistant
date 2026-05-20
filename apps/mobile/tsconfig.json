@@ -1,10 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": ".",
     "jsx": "react-jsx",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,
+    "paths": {
+      "@personal-ai-assistant/shared": ["../../packages/shared/src/index.ts"]
+    },
     "types": ["react"]
   },
   "include": ["App.tsx", "src/**/*.ts", "src/**/*.tsx"]

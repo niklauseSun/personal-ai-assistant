@@ -23,11 +23,11 @@ The server listens on `http://localhost:3000` and exposes `GET /health`.
 
 `apps/mobile` is excluded from the pnpm workspace and uses **yarn** (`yarn@1.22.x`)
 for its dependencies. The mobile app consumes `@personal-ai-assistant/shared`
-through a `file:` reference to `packages/shared/dist`, so build shared first.
+through a `file:` reference to `packages/shared`, and Metro resolves that package
+to the shared TypeScript source during development.
 
 ```bash
 pnpm install --filter @personal-ai-assistant/shared...
-pnpm --filter @personal-ai-assistant/shared build
 
 cd apps/mobile
 yarn install
