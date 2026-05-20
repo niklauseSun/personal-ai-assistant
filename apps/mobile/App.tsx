@@ -389,7 +389,12 @@ export default function App() {
       serverUrl: normalizedServerUrl,
       bindingToken,
       handlers: {
-        onConnectionStatus: (status) => useTaskStore.getState().setConnectionStatus(status),
+        onConnectionStatus: (status) => {
+          useTaskStore.getState().setConnectionStatus(status);
+          if (pendingScannedDesktopRef.current && status === "disconnected") {
+            setPairingCodeError("服务器连接已断开，请确认手机可以访问二维码中的 Server URL。");
+          }
+        },
         onDeviceOnline: (payload) => {
           if (payload.session.clientType === "desktop") {
             const desktopId = getDesktopId(payload.session);
@@ -415,7 +420,12 @@ export default function App() {
             useTaskStore.getState().setError(undefined);
           }
         },
-        onError: (message) => useTaskStore.getState().setError(message),
+        onError: (message) => {
+          useTaskStore.getState().setError(message);
+          if (pendingScannedDesktopRef.current) {
+            setPairingCodeError(message);
+          }
+        },
         onTask: (task) => useTaskStore.getState().upsertTask(task),
         onOutput: (chunk) => useTaskStore.getState().appendOutput(chunk),
         onApproval: (approval) => useTaskStore.getState().upsertApproval(approval),
@@ -590,7 +600,7 @@ export default function App() {
     }
 
     if (connectionStatus !== "connected") {
-      setPairingCodeError("正在连接桌面端，请稍候。");
+      setPairingCodeError("正在连接服务器，请稍候。");
       return;
     }
 

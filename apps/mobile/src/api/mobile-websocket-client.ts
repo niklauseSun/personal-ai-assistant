@@ -60,11 +60,13 @@ export class MobileWebSocketClient {
   private socket?: Socket;
   private handlers?: MobileWebSocketHandlers;
   private bindingToken?: string;
+  private serverUrl?: string;
 
   connect(options: MobileConnectOptions) {
     this.disconnect();
     this.handlers = options.handlers;
     this.bindingToken = options.bindingToken;
+    this.serverUrl = options.serverUrl;
     this.handlers.onConnectionStatus("connecting");
 
     const socket = io(this.namespaceUrl(options.serverUrl), {
@@ -156,7 +158,8 @@ export class MobileWebSocketClient {
     });
 
     socket.on("connect_error", (error) => {
-      this.handlers?.onError(error.message);
+      const serverUrl = this.serverUrl ? this.namespaceUrl(this.serverUrl) : "server";
+      this.handlers?.onError(`Failed to connect to ${serverUrl}: ${error.message}`);
       this.handlers?.onConnectionStatus("disconnected");
     });
 

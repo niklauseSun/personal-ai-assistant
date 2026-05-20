@@ -1,7 +1,8 @@
-import { Inject } from "@nestjs/common";
+import { Inject, Logger } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
+  OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
@@ -32,7 +33,8 @@ const DEFAULT_RELAY_RETRY_DELAY_MS = 100;
     origin: "*"
   }
 })
-export class AgentGateway implements OnGatewayDisconnect {
+export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  private readonly logger = new Logger(AgentGateway.name);
   @WebSocketServer()
   private server!: Server;
   private readonly relayRetryAttempts = parsePositiveInteger(
@@ -51,8 +53,17 @@ export class AgentGateway implements OnGatewayDisconnect {
     private readonly taskService: TaskService
   ) {}
 
+  handleConnection(client: Socket) {
+    this.logger.log(
+      `socket connected id=${client.id} address=${client.handshake.address} transport=${client.conn.transport.name}`
+    );
+  }
+
   async handleDisconnect(client: Socket) {
     const binding = await this.deviceConnectionService.markDisconnected(client.id);
+    this.logger.log(
+      `socket disconnected id=${client.id} clientType=${binding?.clientType ?? "unregistered"} deviceId=${binding?.deviceId ?? "unknown"}`
+    );
     if (binding?.clientType !== "desktop") {
       return;
     }
@@ -78,6 +89,9 @@ export class AgentGateway implements OnGatewayDisconnect {
   async handleDeviceRegister(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
     try {
       const response = await this.deviceConnectionService.register(client.id, payload);
+      this.logger.log(
+        `device registered socket=${client.id} clientType=${response.session.clientType} deviceId=${response.session.deviceId} desktopId=${this.getDesktopIdFromSession(response.session.metadata) ?? "none"}`
+      );
 
       await client.join(
         DeviceConnectionService.roomName(response.session.deviceId, response.session.clientType)
