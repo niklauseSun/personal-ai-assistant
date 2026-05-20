@@ -74,7 +74,8 @@ export class MobileWebSocketClient {
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
-      timeout: 10000
+      timeout: 10000,
+      transports: ["websocket"]
     });
 
     this.socket = socket;
@@ -159,7 +160,7 @@ export class MobileWebSocketClient {
 
     socket.on("connect_error", (error) => {
       const serverUrl = this.serverUrl ? this.namespaceUrl(this.serverUrl) : "server";
-      this.handlers?.onError(`Failed to connect to ${serverUrl}: ${error.message}`);
+      this.handlers?.onError(`Failed to connect to ${serverUrl}: ${formatSocketError(error)}`);
       this.handlers?.onConnectionStatus("disconnected");
     });
 
@@ -242,3 +243,23 @@ export class MobileWebSocketClient {
 }
 
 export type ServerEventPayload = ServerToClientEventPayloads[keyof ServerToClientEventPayloads];
+
+function formatSocketError(error: Error & { description?: unknown; context?: unknown }) {
+  const details = [error.message, stringifySocketErrorDetail(error.description)]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  return details.length > 0 ? details.join(" - ") : "Socket connection failed";
+}
+
+function stringifySocketErrorDetail(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return String(value);
+  }
+
+  return undefined;
+}

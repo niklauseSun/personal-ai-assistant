@@ -152,6 +152,7 @@ export default function App() {
   const boundDesktopsRef = useRef<MobileBoundDesktop[]>([]);
   const pendingScannedDesktopRef = useRef<MobileBoundDesktop | undefined>(undefined);
   const hasSentBindingConfirmRef = useRef(false);
+  const lastConnectionErrorRef = useRef<string | undefined>(undefined);
   const {
     connectionStatus,
     errorMessage,
@@ -383,6 +384,7 @@ export default function App() {
     }
 
     useTaskStore.getState().setError(undefined);
+    lastConnectionErrorRef.current = undefined;
     setDesktopSessions([]);
 
     clientRef.current.connect({
@@ -392,7 +394,10 @@ export default function App() {
         onConnectionStatus: (status) => {
           useTaskStore.getState().setConnectionStatus(status);
           if (pendingScannedDesktopRef.current && status === "disconnected") {
-            setPairingCodeError("服务器连接已断开，请确认手机可以访问二维码中的 Server URL。");
+            setPairingCodeError(
+              lastConnectionErrorRef.current ??
+                "服务器连接已断开，请确认手机可以访问二维码中的 Server URL。"
+            );
           }
         },
         onDeviceOnline: (payload) => {
@@ -421,6 +426,7 @@ export default function App() {
           }
         },
         onError: (message) => {
+          lastConnectionErrorRef.current = message;
           useTaskStore.getState().setError(message);
           if (pendingScannedDesktopRef.current) {
             setPairingCodeError(message);
