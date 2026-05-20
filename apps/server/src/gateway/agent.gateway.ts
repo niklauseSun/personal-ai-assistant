@@ -152,6 +152,10 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
         throw new WsException("desktop binding deviceId must match the registered mobile device");
       }
 
+      this.logger.log(
+        `desktop binding confirm received socket=${client.id} deviceId=${confirmPayload.deviceId} desktopId=${confirmPayload.desktopId}`
+      );
+
       await this.emitToDesktopTargetWithRetry({
         deviceId: binding.deviceId,
         targetDesktopId: confirmPayload.desktopId,
@@ -174,6 +178,9 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const binding = this.deviceConnectionService.requireSocketBinding(client.id, "desktop");
       const confirmPayload = this.toDesktopBindingConfirmPayload(payload);
       this.assertDesktopBindingMatches(binding, confirmPayload.deviceId, confirmPayload.desktopId);
+      this.logger.log(
+        `desktop binding confirmed by desktop socket=${client.id} deviceId=${confirmPayload.deviceId} desktopId=${confirmPayload.desktopId}`
+      );
 
       this.emitToClientType(
         binding.deviceId,
@@ -197,6 +204,9 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const binding = this.deviceConnectionService.requireSocketBinding(client.id, "desktop");
       const failedPayload = this.toDesktopBindingFailedPayload(payload);
       this.assertDesktopBindingMatches(binding, failedPayload.deviceId, failedPayload.desktopId);
+      this.logger.warn(
+        `desktop binding failed by desktop socket=${client.id} deviceId=${failedPayload.deviceId} desktopId=${failedPayload.desktopId} reason=${failedPayload.reason}`
+      );
 
       this.emitToClientType(
         binding.deviceId,
@@ -482,6 +492,9 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }) {
     for (let attempt = 1; attempt <= this.relayRetryAttempts; attempt += 1) {
       if (this.hasDesktopTarget(input.deviceId, input.targetDesktopId)) {
+        this.logger.log(
+          `relay ${input.eventName} to desktop target deviceId=${input.deviceId} desktopId=${input.targetDesktopId ?? "any"} attempt=${attempt}`
+        );
         this.emitToDesktopTarget(
           input.deviceId,
           input.targetDesktopId,
@@ -499,6 +512,14 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const targetDescription = input.targetDesktopId
       ? `desktop ${input.targetDesktopId}`
       : "any desktop";
+    this.logger.warn(
+      `relay ${input.eventName} failed deviceId=${input.deviceId} desktopId=${input.targetDesktopId ?? "any"} attempts=${this.relayRetryAttempts}; onlineDesktopTargets=${JSON.stringify(
+        this.deviceConnectionService.listDesktopBindings(input.deviceId).map((desktop) => ({
+          desktopId: desktop.desktopId,
+          connectionId: desktop.connectionId
+        }))
+      )}`
+    );
     this.emitToClientType(input.deviceId, "mobile", WS_EVENTS.TASK_RELAY_FAILED, {
       taskId: input.taskId,
       deviceId: input.deviceId,

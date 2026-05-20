@@ -111,11 +111,16 @@ export function App() {
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
-      timeout: 10000
+      timeout: 10000,
+      transports: ["websocket"]
     });
 
     socket.on("connect", () => {
-      socket.emit(WS_EVENTS.DEVICE_REGISTER, {
+      if (isActive) {
+        setMessage("Binding relay connected. Enter the pairing code on mobile.");
+      }
+
+      const registerPayload = {
         deviceId: pendingPairingBinding.deviceId,
         clientType: "desktop",
         deviceName: configRef.current.desktopName,
@@ -124,14 +129,34 @@ export function App() {
           pendingPairing: true,
           serverPersistence: "relay_only"
         }
+      };
+
+      socket.emit(WS_EVENTS.DEVICE_REGISTER, registerPayload, (response: unknown) => {
+        if (!isActive) {
+          return;
+        }
+
+        const session = isRecord(response) ? response.session : undefined;
+        const connectionId = isRecord(session) ? session.connectionId : undefined;
+        const deviceId = isRecord(session) ? session.deviceId : undefined;
+        setMessage(
+          typeof connectionId === "string"
+            ? `Binding relay registered: ${connectionId} / ${typeof deviceId === "string" ? deviceId : pendingPairingBinding.deviceId}`
+            : "Binding relay connected, but registration was not acknowledged."
+        );
       });
     });
 
     socket.on(WS_EVENTS.DESKTOP_BINDING_CONFIRM, (payload: DesktopBindingConfirmPayload) => {
+      setMessage(`Binding confirmation received for ${payload.deviceId}. Checking pairing code.`);
+
       if (
         payload.deviceId !== pendingPairingBinding.deviceId ||
         payload.desktopId !== pendingPairingBinding.id
       ) {
+        setMessage(
+          `Binding confirmation ignored. Expected ${pendingPairingBinding.deviceId}/${pendingPairingBinding.id}, got ${payload.deviceId}/${payload.desktopId}.`
+        );
         return;
       }
 
@@ -182,7 +207,21 @@ export function App() {
 
     socket.on("connect_error", (error) => {
       if (isActive) {
-        setMessage(`Binding relay unavailable: ${error.message}`);
+        setMessage(`Binding relay unavailable: ${formatSocketError(error)}`);
+      }
+    });
+
+    socket.on("error", (error) => {
+      if (isActive) {
+        setMessage(
+          `Binding relay error: ${typeof error === "string" ? error : "Unknown socket error"}`
+        );
+      }
+    });
+
+    socket.on("disconnect", (reason) => {
+      if (isActive) {
+        setMessage(`Binding relay disconnected: ${reason}`);
       }
     });
 
@@ -773,6 +812,12 @@ export function App() {
                     {configuredServerUrl}
                   </div>
                 </div>
+                <div className="field">
+                  <span>Device token</span>
+                  <div className="server-url-text" title={qrBinding.deviceId}>
+                    {qrBinding.deviceId}
+                  </div>
+                </div>
               </div>
             </div>
           </section>
@@ -955,6 +1000,30 @@ function createPairingPayload(config: DesktopAppConfig, binding: DesktopMobileBi
 function namespaceUrl(serverUrl: string) {
   const normalized = serverUrl.trim().replace(/\/$/, "");
   return normalized.endsWith(WS_NAMESPACE) ? normalized : `${normalized}${WS_NAMESPACE}`;
+}
+
+function formatSocketError(error: Error & { description?: unknown }) {
+  const details = [error.message, stringifySocketErrorDetail(error.description)]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  return details.length > 0 ? details.join(" - ") : "Socket connection failed";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringifySocketErrorDetail(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return String(value);
+  }
+
+  return undefined;
 }
 
 function serverStatusLabel(status: ServerStatus) {

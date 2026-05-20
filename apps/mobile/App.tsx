@@ -493,12 +493,9 @@ export default function App() {
             failure.failedEventName === WS_EVENTS.DESKTOP_BINDING_CONFIRM ||
             failure.failedEventName === WS_EVENTS.DESKTOP_BINDING_CONFIRMED
           ) {
-            updatePendingScannedDesktop(undefined);
             hasSentBindingConfirmRef.current = false;
             setBindingConfirming(false);
-            setPairingCodeInput("");
-            setPairingCodeError(undefined);
-            useTaskStore.getState().setScreen("scanBinding");
+            setPairingCodeError(failure.error.message);
           }
 
           useTaskStore.getState().applyRelayFailure(failure);
