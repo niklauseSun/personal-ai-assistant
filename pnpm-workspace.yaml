@@ -4,9 +4,6 @@ packages:
   - "packages/*"
 allowBuilds:
   '@nestjs/core': false
-  '@prisma/client': false
-  '@prisma/engines': false
   electron: true
   esbuild: false
   node-pty: false
-  prisma: false

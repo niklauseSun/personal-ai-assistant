@@ -13,7 +13,6 @@ Lightweight monorepo for a personal AI coding assistant.
 
 ```bash
 pnpm install --filter @personal-ai-assistant/server...
-pnpm --filter @personal-ai-assistant/server db:migrate
 pnpm dev:server
 ```
 
@@ -38,26 +37,20 @@ cd ios && bundle install && bundle exec pod install
 
 Do not run `pnpm install` inside `apps/mobile`.
 
-## Server Database
+## Server Runtime
 
-`apps/server` uses PostgreSQL through Prisma. For local development:
+`apps/server` is relay-only and does not require a local database. Mobile task history is kept on
+the mobile client, while the server only routes WebSocket events between bound devices.
 
 ```bash
-cp apps/server/.env.example apps/server/.env
-docker compose -f apps/server/docker-compose.postgres.yml up -d
-pnpm --filter @personal-ai-assistant/server db:migrate
 pnpm dev:server
 ```
 
-For production, set `DATABASE_URL` to your managed PostgreSQL connection string and run:
+For production-style startup:
 
 ```bash
-pnpm --filter @personal-ai-assistant/server db:deploy
 pnpm --filter @personal-ai-assistant/server start
 ```
-
-Server tests use `TEST_DATABASE_URL`. The provided compose file exposes the test database on
-`localhost:5433`.
 
 ## Mobile Animation Rule
 

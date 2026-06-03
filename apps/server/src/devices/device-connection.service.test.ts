@@ -1,27 +1,11 @@
 import assert from "node:assert/strict";
-import { after, before, beforeEach, describe, it } from "node:test";
-import { PrismaService } from "../prisma/prisma.service";
+import { describe, it } from "node:test";
 import { DeviceConnectionService } from "./device-connection.service";
 
-process.env.SERVER_STORAGE_MODE = "persist";
-
 describe("DeviceConnectionService", () => {
-  const prisma = new PrismaService();
-  const service = new DeviceConnectionService(prisma);
-
-  before(async () => {
-    await prisma.$connect();
-  });
-
-  beforeEach(async () => {
-    await prisma.deviceSession.deleteMany();
-  });
-
-  after(async () => {
-    await prisma.$disconnect();
-  });
-
   it("registers desktop and mobile sessions by shared deviceId", async () => {
+    const service = new DeviceConnectionService();
+
     const desktop = await service.register("socket-desktop", {
       deviceId: "binding-1",
       deviceName: "MacBook",
@@ -37,6 +21,7 @@ describe("DeviceConnectionService", () => {
     assert.equal(desktop.session.clientType, "desktop");
     assert.equal(desktop.session.deviceName, "MacBook");
     assert.equal(desktop.session.metadata?.desktopId, "binding-1");
+    assert.equal(desktop.session.metadata?.serverPersistence, "relay_only");
     assert.equal(mobile.session.clientType, "mobile");
     const desktopBinding = service.getSocketBinding("socket-desktop");
     assert.equal(desktopBinding?.deviceId, "binding-1");
@@ -46,6 +31,8 @@ describe("DeviceConnectionService", () => {
   });
 
   it("tracks multiple online desktop bindings for one mobile deviceId", async () => {
+    const service = new DeviceConnectionService();
+
     await service.register("socket-desktop-a", {
       deviceId: "shared-mobile",
       deviceName: "Mac Studio",
@@ -79,13 +66,14 @@ describe("DeviceConnectionService", () => {
     );
   });
 
-  it("tracks relay-only server persistence mode from desktop metadata", async () => {
+  it("downgrades legacy persist metadata to relay-only mode", async () => {
+    const service = new DeviceConnectionService();
     const desktop = await service.register("socket-desktop", {
       deviceId: "binding-relay",
       deviceName: "MacBook",
       clientType: "desktop",
       metadata: {
-        serverPersistence: "relay_only"
+        serverPersistence: "persist"
       }
     });
 
@@ -94,13 +82,13 @@ describe("DeviceConnectionService", () => {
   });
 
   it("updates desktop lastSeenAt from heartbeat", async () => {
+    const service = new DeviceConnectionService();
     const registered = await service.register("socket-heartbeat", {
       deviceId: "binding-heartbeat",
       deviceName: "Mac mini",
       clientType: "desktop",
       metadata: {
-        desktopId: "desktop-heartbeat",
-        serverPersistence: "persist"
+        desktopId: "desktop-heartbeat"
       }
     });
 
@@ -116,42 +104,18 @@ describe("DeviceConnectionService", () => {
     assert.ok(
       Date.parse(heartbeat.session.lastSeenAt) >= Date.parse(registered.session.lastSeenAt)
     );
-
-    const session = await prisma.deviceSession.findUnique({
-      where: {
-        deviceId_clientType: {
-          deviceId: "binding-heartbeat",
-          clientType: "desktop"
-        }
-      }
-    });
-
-    assert.equal(session?.status, "online");
-    assert.ok(session?.lastSeenAt);
   });
 
-  it("marks a disconnected socket offline", async () => {
+  it("marks a disconnected socket offline in memory", async () => {
+    const service = new DeviceConnectionService();
     await service.register("socket-desktop", {
       deviceId: "binding-2",
-      clientType: "desktop",
-      metadata: {
-        serverPersistence: "persist"
-      }
+      clientType: "desktop"
     });
 
-    await service.markDisconnected("socket-desktop");
+    const disconnected = await service.markDisconnected("socket-desktop");
 
-    const session = await prisma.deviceSession.findUnique({
-      where: {
-        deviceId_clientType: {
-          deviceId: "binding-2",
-          clientType: "desktop"
-        }
-      }
-    });
-
-    assert.equal(session?.status, "offline");
-    assert.equal(session?.socketId, null);
+    assert.equal(disconnected?.deviceId, "binding-2");
     assert.equal(service.getSocketBinding("socket-desktop"), undefined);
   });
 });

@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import type {
   ClientType,
   DeviceHeartbeatPayload,
@@ -6,14 +6,11 @@ import type {
   DeviceRegisterPayload,
   ServerPersistenceMode
 } from "@personal-ai-assistant/shared";
-import { PrismaService } from "../prisma/prisma.service";
 import {
   assertObject,
   optionalRecord,
   optionalString,
-  parseMetadata,
-  requireString,
-  stringifyMetadata
+  requireString
 } from "../common/payload";
 
 export interface SocketBinding {
@@ -31,8 +28,6 @@ export interface SocketBinding {
 export class DeviceConnectionService {
   private readonly socketBindings = new Map<string, SocketBinding>();
   private readonly serverPersistenceModes = new Map<string, ServerPersistenceMode>();
-
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   static roomName(deviceId: string, clientType: ClientType) {
     return `device:${deviceId}:${clientType}`;
@@ -59,46 +54,8 @@ export class DeviceConnectionService {
           }
         : payload.metadata;
 
-    const session =
-      this.prisma.isStorageEnabled() && serverPersistence === "persist"
-        ? await this.prisma.deviceSession.upsert({
-            where: {
-              deviceId_clientType: {
-                deviceId: payload.deviceId,
-                clientType: payload.clientType
-              }
-            },
-            create: {
-              deviceId: payload.deviceId,
-              clientType: payload.clientType,
-              deviceName: payload.deviceName,
-              socketId,
-              status: "online",
-              clientVersion: payload.clientVersion,
-              metadataJson: stringifyMetadata(metadata),
-              registeredAt: now,
-              lastSeenAt: now
-            },
-            update: {
-              deviceName: payload.deviceName,
-              socketId,
-              status: "online",
-              clientVersion: payload.clientVersion,
-              metadataJson: stringifyMetadata(metadata),
-              lastSeenAt: now
-            }
-          })
-        : {
-            deviceId: payload.deviceId,
-            clientType: payload.clientType,
-            deviceName: payload.deviceName,
-            clientVersion: payload.clientVersion,
-            registeredAt: now,
-            lastSeenAt: now
-          };
-
-    const registeredAt = session.registeredAt.toISOString();
-    const lastSeenAt = session.lastSeenAt.toISOString();
+    const registeredAt = now.toISOString();
+    const lastSeenAt = registeredAt;
 
     this.socketBindings.set(socketId, {
       deviceId: payload.deviceId,
@@ -123,11 +80,11 @@ export class DeviceConnectionService {
 
     return {
       session: {
-        deviceId: session.deviceId,
-        clientType: session.clientType as ClientType,
+        deviceId: payload.deviceId,
+        clientType: payload.clientType,
         status: "online",
-        deviceName: session.deviceName ?? undefined,
-        clientVersion: session.clientVersion ?? undefined,
+        deviceName: payload.deviceName,
+        clientVersion: payload.clientVersion,
         connectionId: socketId,
         registeredAt,
         lastSeenAt,
@@ -156,18 +113,6 @@ export class DeviceConnectionService {
     const lastSeenAt = now.toISOString();
     binding.lastSeenAt = lastSeenAt;
 
-    if (this.prisma.isStorageEnabled()) {
-      await this.prisma.deviceSession.updateMany({
-        where: {
-          socketId
-        },
-        data: {
-          status: "online",
-          lastSeenAt: now
-        }
-      });
-    }
-
     return {
       session: this.toDeviceSession(binding, socketId, "online"),
       serverTime: lastSeenAt
@@ -181,19 +126,6 @@ export class DeviceConnectionService {
       binding.lastSeenAt = disconnectedAt.toISOString();
     }
     this.socketBindings.delete(socketId);
-
-    if (this.prisma.isStorageEnabled()) {
-      await this.prisma.deviceSession.updateMany({
-        where: {
-          socketId
-        },
-        data: {
-          socketId: null,
-          status: "offline",
-          lastSeenAt: disconnectedAt
-        }
-      });
-    }
 
     return binding;
   }
@@ -222,10 +154,6 @@ export class DeviceConnectionService {
     deviceId: string,
     desktopId?: string
   ): Promise<ServerPersistenceMode> {
-    if (!this.prisma.isStorageEnabled()) {
-      return "relay_only";
-    }
-
     const targetCached = desktopId
       ? this.serverPersistenceModes.get(this.persistenceKey(deviceId, desktopId))
       : undefined;
@@ -238,17 +166,7 @@ export class DeviceConnectionService {
       return cached;
     }
 
-    const session = await this.prisma.deviceSession.findUnique({
-      where: {
-        deviceId_clientType: {
-          deviceId,
-          clientType: "desktop"
-        }
-      }
-    });
-    const mode = this.parseServerPersistenceMode(
-      parseMetadata(session?.metadataJson ?? null)?.serverPersistence
-    );
+    const mode = "relay_only";
     this.serverPersistenceModes.set(this.persistenceKey(deviceId), mode);
     return mode;
   }
@@ -323,11 +241,15 @@ export class DeviceConnectionService {
       return "relay_only";
     }
 
-    if (value === "persist" || value === "relay_only") {
-      return value;
+    if (value === "relay_only") {
+      return "relay_only";
     }
 
-    throw new BadRequestException("metadata.serverPersistence must be persist or relay_only");
+    if (value === "persist") {
+      return "relay_only";
+    }
+
+    throw new BadRequestException("metadata.serverPersistence must be relay_only");
   }
 
   private optionalDesktopId(value: unknown): string | undefined {

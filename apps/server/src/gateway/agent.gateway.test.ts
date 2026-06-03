@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import { WS_EVENTS } from "@personal-ai-assistant/shared";
 import type { Server, Socket } from "socket.io";
 import { DeviceConnectionService } from "../devices/device-connection.service";
-import { PrismaService } from "../prisma/prisma.service";
 import { TaskService } from "../tasks/task.service";
 import { AgentGateway } from "./agent.gateway";
-
-process.env.SERVER_STORAGE_MODE = "relay_only";
 
 class FakeSocket {
   readonly joins: string[] = [];
@@ -37,33 +34,18 @@ class FakeServer {
 }
 
 describe("AgentGateway relay-only mode", () => {
-  const prisma = new PrismaService();
-  const deviceConnectionService = new DeviceConnectionService(prisma);
-  const taskService = new TaskService(prisma);
+  const deviceConnectionService = new DeviceConnectionService();
+  const taskService = new TaskService();
   let gateway: AgentGateway;
   let server: FakeServer;
 
-  before(async () => {
-    await prisma.$connect();
-  });
-
-  beforeEach(async () => {
+  beforeEach(() => {
     process.env.RELAY_RETRY_ATTEMPTS = "5";
     process.env.RELAY_RETRY_DELAY_MS = "0";
-    await prisma.taskEvent.deleteMany();
-    await prisma.approvalResult.deleteMany();
-    await prisma.approvalRequest.deleteMany();
-    await prisma.outputChunk.deleteMany();
-    await prisma.agentTask.deleteMany();
-    await prisma.deviceSession.deleteMany();
 
     gateway = new AgentGateway(deviceConnectionService, taskService);
     server = new FakeServer();
     Object.assign(gateway, { server: server as unknown as Server });
-  });
-
-  after(async () => {
-    await prisma.$disconnect();
   });
 
   it("relays task events without storing task history", async () => {
@@ -105,7 +87,6 @@ describe("AgentGateway relay-only mode", () => {
 
     assert.equal(created.task.id, "task-relay");
     assert.equal(created.task.assignedDesktopDeviceId, "desktop-relay");
-    assert.equal(await prisma.agentTask.count(), 0);
     assert.ok(
       desktop.joins.includes(
         DeviceConnectionService.desktopTargetRoomName("binding-relay", "desktop-relay")
@@ -146,9 +127,6 @@ describe("AgentGateway relay-only mode", () => {
       mobile as unknown as Socket
     );
 
-    assert.equal(await prisma.outputChunk.count(), 0);
-    assert.equal(await prisma.approvalResult.count(), 0);
-    assert.equal(await prisma.taskEvent.count(), 0);
     assert.ok(
       server.emissions.some(
         (emission) =>
@@ -209,7 +187,6 @@ describe("AgentGateway relay-only mode", () => {
       (relayFailure.payload as { error: { code: string } }).error.code,
       "RELAY_TARGET_OFFLINE"
     );
-    assert.equal(await prisma.agentTask.count(), 0);
   });
 
   it("relays desktop heartbeat as an online update to mobile clients", async () => {

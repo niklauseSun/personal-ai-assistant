@@ -9,7 +9,7 @@ import { DesktopConfigStore, normalizeConfig } from "./desktop-config-store";
 const fallback: DesktopAppConfig = {
   serverUrl: "http://122.51.133.4:3000",
   desktopName: "desk-1",
-  serverPersistence: "persist",
+  serverPersistence: "relay_only",
   bindings: []
 };
 

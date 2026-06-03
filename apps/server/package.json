@@ -3,16 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "pnpm prisma:generate && tsc -p tsconfig.json",
-    "db:deploy": "DATABASE_URL=\"${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/personal_ai_assistant?schema=public}\" prisma migrate deploy --schema prisma/schema.prisma",
-    "db:migrate": "DATABASE_URL=\"${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/personal_ai_assistant?schema=public}\" prisma migrate dev --schema prisma/schema.prisma",
-    "db:push": "pnpm db:migrate",
-    "db:reset": "DATABASE_URL=\"${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/personal_ai_assistant?schema=public}\" prisma migrate reset --force --skip-seed --schema prisma/schema.prisma",
-    "prisma:generate": "DATABASE_URL=\"${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/personal_ai_assistant?schema=public}\" prisma generate --schema prisma/schema.prisma",
-    "start": "pnpm prisma:generate && DATABASE_URL=\"${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/personal_ai_assistant?schema=public}\" tsx src/main.ts",
-    "start:dev": "DATABASE_URL=\"${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/personal_ai_assistant?schema=public}\" tsx watch src/main.ts",
-    "test": "pnpm prisma:generate && DATABASE_URL=\"${TEST_DATABASE_URL:-postgresql://postgres:postgres@localhost:5433/personal_ai_assistant_test?schema=public}\" prisma migrate reset --force --skip-seed --schema prisma/schema.prisma && DATABASE_URL=\"${TEST_DATABASE_URL:-postgresql://postgres:postgres@localhost:5433/personal_ai_assistant_test?schema=public}\" tsx --test src/**/*.test.ts",
-    "typecheck": "pnpm prisma:generate && tsc --noEmit -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "start": "tsx src/main.ts",
+    "start:dev": "tsx watch src/main.ts",
+    "test": "tsx --test src/**/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",
@@ -21,14 +16,12 @@
     "@nestjs/platform-socket.io": "^11.1.6",
     "@nestjs/websockets": "^11.1.6",
     "@personal-ai-assistant/shared": "workspace:*",
-    "@prisma/client": "^6.19.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
-    "prisma": "^6.19.3",
     "tsx": "^4.20.6"
   }
 }

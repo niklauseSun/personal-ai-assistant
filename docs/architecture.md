@@ -48,17 +48,18 @@ personal-ai-assistant/
   tsconfig.base.json
 ```
 
-## 2. Core Data Model
+## 2. Core Runtime Model
 
-SQLite is the first persistence target. The model is intentionally relational and portable so the storage adapter can later move to PostgreSQL without changing app-level contracts.
+The server is relay-only: it keeps active socket bindings in memory and does not persist task
+history. Mobile keeps its own local task history, while the shared contracts still describe the
+payloads that move between mobile, server, and desktop.
 
 | Model | Purpose | Key Fields |
 | --- | --- | --- |
-| `DeviceSession` | Simulated device binding before real auth exists. | `deviceId`, `role`, `status`, `displayName`, `registeredAt`, `lastSeenAt` |
+| `DeviceSession` | In-memory socket registration and device presence. | `deviceId`, `clientType`, `status`, `deviceName`, `lastSeenAt` |
 | `AgentTask` | One mobile prompt and one Codex execution lifecycle. | `id`, `prompt`, `createdByDeviceId`, `assignedDesktopDeviceId`, `status`, timestamps |
-| `OutputChunk` | Ordered stdout/stderr/system chunks. | `id`, `taskId`, `stream`, `sequence`, `content`, `createdAt` |
+| `OutputChunk` | Ordered stdout/stderr/system chunks relayed from desktop to mobile. | `id`, `taskId`, `stream`, `sequence`, `content`, `createdAt` |
 | `ApprovalRequest` | A Codex approval checkpoint that mobile can approve or reject. | `id`, `taskId`, `status`, `title`, `message`, `command`, `metadata`, timestamps |
-| `TaskStateEvent` | Audit trail for status changes. | `id`, `taskId`, `fromStatus`, `toStatus`, `reason`, `createdAt` |
 
 Initial status flow:
 
@@ -106,30 +107,28 @@ Server-to-client events:
 - Add empty mobile and desktop screens.
 - Verify the server can start.
 
-### Phase 2: SQLite Persistence
+### Phase 2: Mobile Local History
 
-- Add a storage layer with SQLite as the first adapter.
-- Create migrations for devices, tasks, task outputs, approval requests, and task state events.
-- Implement repository methods around shared contracts.
-- Add API/service tests for persistence and history reads.
+- Store task history on the mobile client.
+- Keep the server relay-only so local development does not require a database.
+- Add API/service tests around relay validation and offline target failure reporting.
 
 ### Phase 3: Device Binding and Task Creation
 
 - Implement `device.register`, `device.online`, and `task.create`.
-- Persist devices and tasks.
+- Track active desktop sockets in memory.
 - Assign queued tasks to the active desktop device.
-- Add basic task list/history views.
+- Add basic task list/history views backed by mobile local storage.
 
 ### Phase 4: Desktop Codex Runner
 
 - Launch Codex CLI from desktop via `child_process` first; evaluate `node-pty` if interactive terminal behavior is required.
 - Stream stdout/stderr back through WebSocket.
-- Persist ordered outputs and status changes server-side.
+- Relay ordered outputs and status changes to mobile.
 
 ### Phase 5: Approval Loop
 
 - Detect Codex approval prompts in the desktop runner.
-- Persist `ApprovalRequest` records.
 - Send `task.waiting_approval` to mobile.
 - Forward `task.approval.submit` results back to the desktop runner.
 
@@ -137,7 +136,6 @@ Server-to-client events:
 
 - Add reconnection, replay-from-sequence, and task cancellation.
 - Add real authentication and replace simulated `deviceId` binding.
-- Introduce a database adapter boundary and migrate SQLite to PostgreSQL.
 - Add packaging for desktop and mobile builds.
 
 ## 5. Phase 1 Files

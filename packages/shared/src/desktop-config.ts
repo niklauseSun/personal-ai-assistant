@@ -1,6 +1,6 @@
 import type { MobileDeviceInfo } from "./models";
 
-export type ServerPersistenceMode = "persist" | "relay_only";
+export type ServerPersistenceMode = "relay_only";
 
 export const DESKTOP_PAIRING_PAYLOAD_TYPE = "personal-ai-assistant.desktop-binding" as const;
 export const DESKTOP_PAIRING_PAYLOAD_VERSION = 1 as const;

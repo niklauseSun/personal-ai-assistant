@@ -41,31 +41,3 @@ export function optionalRecord(
 
   return value as Record<string, unknown>;
 }
-
-export function parseDate(value: string | undefined, fallback = new Date()): Date {
-  if (!value) {
-    return fallback;
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return fallback;
-  }
-
-  return date;
-}
-
-export function stringifyMetadata(value: Record<string, unknown> | undefined): string | undefined {
-  return value ? JSON.stringify(value) : undefined;
-}
-
-export function parseMetadata(value: string | null): Record<string, unknown> | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  const parsed = JSON.parse(value);
-  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>)
-    : undefined;
-}
